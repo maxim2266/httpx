@@ -86,62 +86,17 @@ func TestBufferLarge(t *testing.T) {
 	}
 }
 
-// benchmark specifically the buffer's file backing behavior
-func BenchmarkBufferFileBacking(b *testing.B) {
-	sizes := []struct {
-		name  string
-		bytes int
-	}{
-		{"UnderBuffer_32KB", 32 * 1024},
-		{"ExactBuffer_64KB", 64 * 1024},
-		{"JustOverBuffer_65KB", 65 * 1024},
-		{"DoubleBuffer_128KB", 128 * 1024},
-		{"QuadBuffer_256KB", 256 * 1024},
-	}
-
-	for _, size := range sizes {
-		b.Run(size.name, func(b *testing.B) {
-			testData := bytes.Repeat([]byte("x"), size.bytes)
-
-			b.ResetTimer()
-			b.ReportAllocs()
-
-			for i := 0; i < b.N; i++ {
-				buf := allocBuffer()
-
-				// Write data
-				written, err := buf.Write(testData)
-				if err != nil {
-					b.Fatalf("Write failed: %v", err)
-				}
-				if written != size.bytes {
-					b.Fatalf("write mismatch: got %d, want %d", written, size.bytes)
-				}
-
-				// Flush to get size
-				length, err := buf.flush()
-				if err != nil {
-					b.Fatalf("Flush failed: %v", err)
-				}
-				if int(length) != size.bytes {
-					b.Fatalf("length mismatch: got %d, want %d", length, size.bytes)
-				}
-
-				// Write to a discard writer
-				err = buf.writeTo(io.Discard)
-				if err != nil {
-					b.Fatalf("writeTo failed: %v", err)
-				}
-
-				buf.recycle()
-			}
-		})
-	}
-}
-
 // compare memory-only vs file-backed for different sizes
 func BenchmarkBufferMemoryVsFile(b *testing.B) {
-	sizes := []int{32 * 1024, 64 * 1024, 65 * 1024, 128 * 1024, 256 * 1024, 512 * 1024}
+	sizes := []int{
+		32 * 1024,
+		64 * 1024,
+		65 * 1024,
+		128 * 1024,
+		256 * 1024,
+		512 * 1024,
+		1024 * 1024,
+	}
 
 	for _, size := range sizes {
 		b.Run(formatSize(size), func(b *testing.B) {
@@ -161,7 +116,7 @@ func BenchmarkBufferMemoryVsFile(b *testing.B) {
 	}
 }
 
-// helper function
+// helpers
 func formatSize(bytes int) string {
 	switch {
 	case bytes < 1024:
