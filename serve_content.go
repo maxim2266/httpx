@@ -12,8 +12,8 @@ import (
 
 type ContentMaker = func(io.Writer) (string, error)
 
-// Respond generates dynamic content and writes it to the response.
-func Respond(w http.ResponseWriter, r *http.Request, fn ContentMaker) (err error) {
+// ServeContent generates dynamic content and writes it to the response.
+func ServeContent(w http.ResponseWriter, r *http.Request, fn ContentMaker) (err error) {
 	var (
 		contentType string
 		contentLen  int64

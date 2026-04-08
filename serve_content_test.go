@@ -159,7 +159,7 @@ func TestRespond(t *testing.T) {
 			}
 
 			w := httptest.NewRecorder()
-			err := Respond(w, req, tt.contentMaker)
+			err := ServeContent(w, req, tt.contentMaker)
 
 			if (err != nil) != tt.expectError {
 				t.Errorf("Respond() error = %v, expectError %v", err, tt.expectError)
@@ -210,7 +210,7 @@ func TestRespondLargeContent(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/", nil)
 	w := httptest.NewRecorder()
 
-	err := Respond(w, req, func(wr io.Writer) (string, error) {
+	err := ServeContent(w, req, func(wr io.Writer) (string, error) {
 		wr.Write([]byte(largeData))
 		return "text/plain", nil
 	})
@@ -266,7 +266,7 @@ func BenchmarkRespondWithIncreasingSizes(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				var w discardWriter
 
-				err := Respond(&w, req, func(wr io.Writer) (string, error) {
+				err := ServeContent(&w, req, func(wr io.Writer) (string, error) {
 					wr.Write(testData)
 					return "text/plain", nil
 				})
@@ -277,7 +277,7 @@ func BenchmarkRespondWithIncreasingSizes(b *testing.B) {
 
 				// verify content length
 				if w.size != size.bytes {
-					b.Fatalf("size mismatch: got %d, want %d", w.size, size.bytes)
+					b.Fatalf("size mismatch: %d instead of %d", w.size, size.bytes)
 				}
 			}
 		})
