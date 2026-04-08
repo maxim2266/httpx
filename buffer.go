@@ -56,7 +56,7 @@ func (b *buffer) Write(data []byte) (n int, err error) {
 func (b *buffer) writeTo(w io.Writer) (err error) {
 	if b.file == nil {
 		_, err = w.Write(b.buff[:b.wi])
-	} else if _, err = b.file.Seek(0, io.SeekStart); err == nil {
+	} else {
 		_, err = b.file.WriteTo(w)
 	}
 
@@ -78,8 +78,13 @@ func (b *buffer) flush() (n int64, err error) {
 		b.wi = 0
 	}
 
-	// return file size
-	return b.file.Seek(0, io.SeekCurrent)
+	// file size
+	if n, err = b.file.Seek(0, io.SeekCurrent); err == nil {
+		// prepare for writeTo() call
+		_, err = b.file.Seek(0, io.SeekStart)
+	}
+
+	return
 }
 
 func (b *buffer) recycle() {
