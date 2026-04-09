@@ -39,13 +39,13 @@ func ServeContent(w http.ResponseWriter, r *http.Request, fn ContentMaker) (err 
 	}
 
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError)
+		sendErr(w, http.StatusInternalServerError)
 		return
 	}
 
 	// flush the buffer
 	if contentLen, err = b.flush(); err != nil {
-		writeErr(w, http.StatusInternalServerError)
+		sendErr(w, http.StatusInternalServerError)
 		return
 	}
 
@@ -87,6 +87,6 @@ const gzipRE = `(?i)(^|,)\s*(gzip(\s*;\s*q\s*=\s*(0?\.([1-9]\d{0,2})|1(\.0{0,3})
 var gzipAccepted = regexp.MustCompile(gzipRE).MatchString
 
 // error writer
-func writeErr(w http.ResponseWriter, code int) {
+func sendErr(w http.ResponseWriter, code int) {
 	http.Error(w, http.StatusText(code), code)
 }
