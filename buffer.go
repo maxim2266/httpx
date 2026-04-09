@@ -6,6 +6,10 @@ import (
 	"sync"
 )
 
+// TempDir is a pathname of the directory to use for temporary files. Empty string (default value)
+// means that the files are created in the directory returned from [os.TempDir] function.
+var TempDir string
+
 type buffer struct {
 	wi   int
 	file *os.File
@@ -21,6 +25,7 @@ func (b *buffer) Write(data []byte) (n int, err error) {
 	switch {
 	case len(data) == 0:
 		return
+
 	case b.wi+len(data) <= cap(b.buff):
 		n = copy(b.buff[b.wi:], data)
 		b.wi += n

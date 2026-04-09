@@ -1,3 +1,4 @@
+// Package httpx is a collection of useful addons for net/http.
 package httpx
 
 import (
@@ -10,9 +11,13 @@ import (
 	"time"
 )
 
+// ContentMaker is a function that writes the content to the given [io.Writer]
+// and returns Content-Type value as a string, or an error.
 type ContentMaker = func(io.Writer) (string, error)
 
-// ServeContent generates dynamic content and writes it to the response.
+// ServeContent calls the given [ContentMaker] function to generate (dynamic) content, and then
+// writes the content to the given [http.ResponseWriter], while handling other aspects of the
+// response delivery (like error processing, buffering, and setting HTTP headers) internally.
 func ServeContent(w http.ResponseWriter, r *http.Request, fn ContentMaker) (err error) {
 	var (
 		contentType string
@@ -59,7 +64,7 @@ func ServeContent(w http.ResponseWriter, r *http.Request, fn ContentMaker) (err 
 		h.Set("Content-Encoding", "gzip")
 	}
 
-	w.WriteHeader(http.StatusOK) // ???
+	w.WriteHeader(http.StatusOK)
 
 	// the actual write
 	return b.writeTo(w)
@@ -79,11 +84,7 @@ func gzipped(w io.Writer, fn ContentMaker) (cont string, err error) {
 
 const gzipRE = `(?i)(^|,)\s*(gzip(\s*;\s*q\s*=\s*(0?\.([1-9]\d{0,2})|1(\.0{0,3})?))?|\*)\s*(,|$)`
 
-var (
-	gzipAccepted = regexp.MustCompile(gzipRE).MatchString
-
-	TempDir string
-)
+var gzipAccepted = regexp.MustCompile(gzipRE).MatchString
 
 // error writer
 func writeErr(w http.ResponseWriter, code int) {
