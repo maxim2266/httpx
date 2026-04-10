@@ -6,6 +6,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -28,18 +29,12 @@ func isAcceptable(headers []string, targetType string) bool {
 		return true
 	}
 
-	if len(targetType) == 0 {
-		return false
-	}
-
 	// target media type
-	targetType, _, err := mime.ParseMediaType(targetType)
+	main, sub := splitMediaType(targetType)
 
-	if err != nil {
+	if len(main) == 0 {
 		return false
 	}
-
-	main, sub, _ := strings.Cut(targetType, "/")
 
 	// acceptance check
 	for _, h := range headers {
@@ -73,3 +68,18 @@ func isAcceptable(headers []string, targetType string) bool {
 
 	return false
 }
+
+func splitMediaType(s string) (main, sub string) {
+	if m := matchMediaType(s); len(m) == 3 {
+		main, sub = m[1], m[2]
+	}
+
+	return
+}
+
+const (
+	restrictedNameRE = `[A-Za-z0-9][A-Za-z0-9!#$&\-^_.+]{0,126}`
+	mediaTypeRE      = "^(" + restrictedNameRE + ")/(" + restrictedNameRE + ")$"
+)
+
+var matchMediaType = regexp.MustCompile(mediaTypeRE).FindStringSubmatch
