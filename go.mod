@@ -1,3 +1,3 @@
-module maxim2266/httpx
+module github.com/maxim2266/httpx
 
 go 1.25
