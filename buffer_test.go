@@ -24,7 +24,7 @@ func TestBufferSmall(t *testing.T) {
 		t.Fatalf("Write: length %d instead of %d", n, len(data))
 	}
 
-	size, err := b.flush()
+	size, err := b.complete()
 
 	if err != nil {
 		t.Fatalf("flush: %s", err)
@@ -65,7 +65,7 @@ func TestBufferLarge(t *testing.T) {
 		}
 	}
 
-	n, err := b.flush()
+	n, err := b.complete()
 
 	if err != nil {
 		t.Fatalf("flush: %s", err)
@@ -108,7 +108,7 @@ func BenchmarkBufferMemoryVsFile(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				buf := allocBuffer()
 				buf.Write(testData)
-				buf.flush()
+				buf.complete()
 				buf.writeTo(io.Discard)
 				buf.recycle()
 			}

@@ -44,7 +44,7 @@ func ServeContent(w http.ResponseWriter, r *http.Request, fn ContentMaker) (err 
 	}
 
 	// flush the buffer
-	if contentLen, err = b.flush(); err != nil {
+	if contentLen, err = b.complete(); err != nil {
 		sendErr(w, http.StatusInternalServerError)
 		return
 	}
@@ -70,8 +70,8 @@ func ServeContent(w http.ResponseWriter, r *http.Request, fn ContentMaker) (err 
 	return b.writeTo(w)
 }
 
-func gzipped(w io.Writer, fn ContentMaker) (cont string, err error) {
-	gz := gzip.NewWriter(w)
+func gzipped(b *buffer, fn ContentMaker) (cont string, err error) {
+	gz := gzip.NewWriter(b)
 
 	gz.Header.ModTime = time.Now()
 

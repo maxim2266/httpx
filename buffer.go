@@ -68,7 +68,7 @@ func (b *buffer) writeTo(w io.Writer) (err error) {
 	return
 }
 
-func (b *buffer) flush() (n int64, err error) {
+func (b *buffer) complete() (n int64, err error) {
 	if b.file == nil {
 		n = int64(b.wi)
 		return
