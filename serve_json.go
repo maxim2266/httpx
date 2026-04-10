@@ -32,8 +32,16 @@ func isAcceptable(headers []string, targetType string) bool {
 		return false
 	}
 
+	// target media type
+	targetType, _, err := mime.ParseMediaType(targetType)
+
+	if err != nil {
+		return false
+	}
+
 	main, sub, _ := strings.Cut(targetType, "/")
 
+	// acceptance check
 	for _, h := range headers {
 		for part := range strings.SplitSeq(h, ",") {
 			if part = strings.TrimSpace(part); len(part) == 0 {
@@ -53,6 +61,7 @@ func isAcceptable(headers []string, targetType string) bool {
 				}
 			}
 
+			// media type
 			m, s, _ := strings.Cut(mediaType, "/")
 
 			// match
