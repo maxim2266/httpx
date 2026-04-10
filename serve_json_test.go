@@ -2,6 +2,8 @@ package httpx
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -177,203 +179,165 @@ func TestIsAcceptable(t *testing.T) {
 
 func TestServeJson(t *testing.T) {
 	tests := []struct {
-		name           string
-		acceptHeader   string
-		obj            any
-		expectedStatus int
-		expectedBody   string
-		expectError    bool
+		name            string
+		acceptHeader    string
+		fn              func(*json.Encoder) error
+		wantStatus      int
+		wantContentType string
+		wantBody        string
+		wantErr         bool
 	}{
 		{
-			name:           "valid JSON request with correct Accept header",
-			acceptHeader:   "application/json",
-			obj:            map[string]string{"message": "hello"},
-			expectedStatus: http.StatusOK,
-			expectedBody:   `{"message":"hello"}` + "\n",
-			expectError:    false,
+			name:         "exact match - application/json accepted",
+			acceptHeader: "application/json",
+			fn: func(enc *json.Encoder) error {
+				return enc.Encode(map[string]string{"key": "value"})
+			},
+			wantStatus:      http.StatusOK,
+			wantContentType: "application/json",
+			wantBody:        `{"key":"value"}` + "\n",
+			wantErr:         false,
 		},
 		{
-			name:           "valid JSON request with Accept header containing multiple types",
-			acceptHeader:   "text/html, application/json, */*",
-			obj:            []int{1, 2, 3},
-			expectedStatus: http.StatusOK,
-			expectedBody:   `[1,2,3]` + "\n",
-			expectError:    false,
+			name:         "wildcard subtype - application/* accepts json",
+			acceptHeader: "application/*",
+			fn: func(enc *json.Encoder) error {
+				return enc.Encode(map[string]string{"key": "value"})
+			},
+			wantStatus:      http.StatusOK,
+			wantContentType: "application/json",
+			wantBody:        `{"key":"value"}` + "\n",
+			wantErr:         false,
 		},
 		{
-			name:           "valid JSON request with */ Accept header",
-			acceptHeader:   "*/*",
-			obj:            struct{ Name string }{"test"},
-			expectedStatus: http.StatusOK,
-			expectedBody:   `{"Name":"test"}` + "\n",
-			expectError:    false,
+			name:         "full wildcard - */* accepts json",
+			acceptHeader: "*/*",
+			fn: func(enc *json.Encoder) error {
+				return enc.Encode(map[string]string{"key": "value"})
+			},
+			wantStatus:      http.StatusOK,
+			wantContentType: "application/json",
+			wantBody:        `{"key":"value"}` + "\n",
+			wantErr:         false,
 		},
 		{
-			name:           "invalid Accept header - wrong type",
-			acceptHeader:   "application/xml",
-			obj:            map[string]string{"message": "hello"},
-			expectedStatus: http.StatusNotAcceptable,
-			expectedBody:   "Not Acceptable\n",
-			expectError:    true,
+			name:         "multiple types - json later in list",
+			acceptHeader: "text/html, application/json;q=0.9, */*;q=0.8",
+			fn: func(enc *json.Encoder) error {
+				return enc.Encode(map[string]string{"key": "value"})
+			},
+			wantStatus:      http.StatusOK,
+			wantContentType: "application/json",
+			wantBody:        `{"key":"value"}` + "\n",
+			wantErr:         false,
 		},
 		{
-			name:           "invalid Accept header - text/plain only",
-			acceptHeader:   "text/plain",
-			obj:            map[string]string{"message": "hello"},
-			expectedStatus: http.StatusNotAcceptable,
-			expectedBody:   "Not Acceptable\n",
-			expectError:    true,
+			name:         "empty accept header - accepts everything",
+			acceptHeader: "",
+			fn: func(enc *json.Encoder) error {
+				return enc.Encode(map[string]string{"key": "value"})
+			},
+			wantStatus:      http.StatusOK,
+			wantContentType: "application/json",
+			wantBody:        `{"key":"value"}` + "\n",
+			wantErr:         false,
 		},
 		{
-			name:           "empty Accept header - should accept JSON",
-			acceptHeader:   "",
-			obj:            map[string]string{"message": "hello"},
-			expectedStatus: http.StatusOK,
-			expectedBody:   `{"message":"hello"}` + "\n",
-			expectError:    false,
+			name:         "no matching accept type",
+			acceptHeader: "text/html, application/xml",
+			fn: func(enc *json.Encoder) error {
+				return enc.Encode(map[string]string{"key": "value"})
+			},
+			wantStatus: http.StatusNotAcceptable,
+			wantBody:   "Not Acceptable\n",
+			wantErr:    true,
 		},
 		{
-			name:           "nil object - valid JSON",
-			acceptHeader:   "application/json",
-			obj:            nil,
-			expectedStatus: http.StatusOK,
-			expectedBody:   "null\n",
-			expectError:    false,
+			name:         "q=0 for json - not acceptable",
+			acceptHeader: "application/json;q=0, text/html",
+			fn: func(enc *json.Encoder) error {
+				return enc.Encode(map[string]string{"key": "value"})
+			},
+			wantStatus: http.StatusNotAcceptable,
+			wantBody:   "Not Acceptable\n",
+			wantErr:    true,
 		},
 		{
-			name:           "primitive type - int",
-			acceptHeader:   "application/json",
-			obj:            42,
-			expectedStatus: http.StatusOK,
-			expectedBody:   "42\n",
-			expectError:    false,
+			name:         "malformed accept header - skips and finds match",
+			acceptHeader: "invalid;q=1.0, application/json",
+			fn: func(enc *json.Encoder) error {
+				return enc.Encode(map[string]string{"key": "value"})
+			},
+			wantStatus:      http.StatusOK,
+			wantContentType: "application/json",
+			wantBody:        `{"key":"value"}` + "\n",
+			wantErr:         false,
 		},
 		{
-			name:           "primitive type - string",
-			acceptHeader:   "application/json",
-			obj:            "hello",
-			expectedStatus: http.StatusOK,
-			expectedBody:   `"hello"` + "\n",
-			expectError:    false,
+			name:         "fn returns error",
+			acceptHeader: "application/json",
+			fn: func(enc *json.Encoder) error {
+				return errors.New("encoding failed")
+			},
+			wantStatus: http.StatusInternalServerError,
+			wantBody:   "Internal Server Error\n",
+			wantErr:    true,
 		},
 		{
-			name:           "Accept header with quality values",
-			acceptHeader:   "text/html;q=0.8, application/json;q=0.9",
-			obj:            map[string]string{"message": "hello"},
-			expectedStatus: http.StatusOK,
-			expectedBody:   `{"message":"hello"}` + "\n",
-			expectError:    false,
+			name:         "case insensitive match",
+			acceptHeader: "Application/Json",
+			fn: func(enc *json.Encoder) error {
+				return enc.Encode(map[string]string{"key": "value"})
+			},
+			wantStatus:      http.StatusOK,
+			wantContentType: "application/json",
+			wantBody:        `{"key":"value"}` + "\n",
+			wantErr:         false,
+		},
+		{
+			name:         "json with charset parameter",
+			acceptHeader: "application/json;charset=utf-8",
+			fn: func(enc *json.Encoder) error {
+				return enc.Encode(map[string]string{"key": "value"})
+			},
+			wantStatus:      http.StatusOK,
+			wantContentType: "application/json",
+			wantBody:        `{"key":"value"}` + "\n",
+			wantErr:         false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest("GET", "/", nil)
+
 			if tt.acceptHeader != "" {
-				req.Header.Set("Accept", tt.acceptHeader)
+				r.Header.Set("Accept", tt.acceptHeader)
 			}
 
-			w := httptest.NewRecorder()
-			err := ServeJson(w, req, tt.obj)
+			err := ServeJson(w, r, tt.fn)
 
-			if (err != nil) != tt.expectError {
-				t.Fatalf("ServeJson() error = %v, expectError %v", err, tt.expectError)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ServeJson() error = %v, wantErr %v", err, tt.wantErr)
 			}
 
-			if w.Code != tt.expectedStatus {
-				t.Fatalf("status code = %v, want %v", w.Code, tt.expectedStatus)
+			resp := w.Result()
+			defer resp.Body.Close()
+
+			if resp.StatusCode != tt.wantStatus {
+				t.Errorf("ServeJson() status = %v, want %v", resp.StatusCode, tt.wantStatus)
 			}
 
-			// for successful responses, verify JSON content
-			if tt.expectedStatus == http.StatusOK {
-				// verify Content-Type header
-				if contentType := w.Header().Get("Content-Type"); contentType != "application/json" {
-					t.Fatalf("Content-Type = %v, want application/json", contentType)
-				}
-
-				// verify body is valid JSON
-				var result any
-				if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
-					t.Fatalf("response body is not valid JSON: %v", err)
-				}
-
-				// verify body content (as string)
-				if w.Body.String() != tt.expectedBody {
-					t.Fatalf("body = %q, want %q", w.Body.String(), tt.expectedBody)
-				}
-			} else {
-				// for error responses, verify error body
-				if w.Body.String() != tt.expectedBody {
-					t.Fatalf("body = %q, want %q", w.Body.String(), tt.expectedBody)
+			if tt.wantContentType != "" {
+				if ct := resp.Header.Get("Content-Type"); ct != tt.wantContentType {
+					t.Errorf("ServeJson() Content-Type = %v, want %v", ct, tt.wantContentType)
 				}
 			}
-		})
-	}
-}
 
-// Test that ServeJson properly handles encoding errors (e.g., channel)
-func TestServeJsonEncodingError(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("Accept", "application/json")
-
-	w := httptest.NewRecorder()
-
-	// channel cannot be encoded to JSON
-	obj := make(chan int)
-
-	err := ServeJson(w, req, obj)
-
-	if err == nil {
-		t.Fatal("ServeJson() expected error from JSON encoding, got nil")
-	}
-
-	if w.Code != http.StatusInternalServerError {
-		t.Fatalf("status code = %v, want 500", w.Code)
-	}
-}
-
-// Test that ServeJson passes through the underlying ServeContent behavior
-// for range requests (if supported)
-func TestServeJsonWithAcceptHeaderVariants(t *testing.T) {
-	variants := []struct {
-		name         string
-		acceptHeader string
-		shouldAccept bool
-	}{
-		{"exact match", "application/json", true},
-		{"with charset", "application/json; charset=utf-8", true},
-		{"wildcard", "*/*", true},
-		{"partial match", "application/*", true},
-		{"wrong type", "text/plain", false},
-		{"multiple types with JSON", "text/html, application/json, application/xml", true},
-		{"quality values with JSON higher", "text/html;q=0.5, application/json;q=0.9", true},
-		{"quality values with JSON lower", "application/json;q=0.2, text/html;q=0.9", true}, // Still acceptable
-	}
-
-	for _, v := range variants {
-		t.Run(v.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "/", nil)
-			req.Header.Set("Accept", v.acceptHeader)
-
-			w := httptest.NewRecorder()
-			err := ServeJson(w, req, map[string]string{"test": "value"})
-
-			if v.shouldAccept {
-				if err != nil {
-					t.Fatalf("expected success, got error: %v", err)
-				}
-				if w.Code != http.StatusOK {
-					t.Fatalf("expected 200, got %d", w.Code)
-				}
-				if w.Header().Get("Content-Type") != "application/json" {
-					t.Fatalf("Content-Type = %v, want application/json", w.Header().Get("Content-Type"))
-				}
-			} else {
-				if err == nil {
-					t.Fatal("expected error, got nil")
-				}
-				if w.Code != http.StatusNotAcceptable {
-					t.Fatalf("expected 406, got %d", w.Code)
+			if tt.wantBody != "" {
+				if body, _ := io.ReadAll(resp.Body); string(body) != tt.wantBody {
+					t.Errorf("ServeJson() body = %q, want %q", string(body), tt.wantBody)
 				}
 			}
 		})

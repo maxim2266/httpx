@@ -11,16 +11,16 @@ import (
 	"strings"
 )
 
-// ServeJson serialises the given object to JSON and sends it back to the client.
-func ServeJson(w http.ResponseWriter, r *http.Request, obj any) error {
-	if !isAcceptable(r.Header.Values("Accept"), "application/json") {
-		sendErr(w, http.StatusNotAcceptable)
-		return errors.New("request does not accept application/json")
+// ServeJson is built on top of ServeContent specifically for JSON-encoded responses.
+func ServeJson(w http.ResponseWriter, r *http.Request, fn func(*json.Encoder) error) error {
+	if isAcceptable(r.Header.Values("Accept"), "application/json") {
+		return ServeContent(w, r, func(dest io.Writer) (string, error) {
+			return "application/json", fn(json.NewEncoder(dest))
+		})
 	}
 
-	return ServeContent(w, r, func(dest io.Writer) (string, error) {
-		return "application/json", json.NewEncoder(dest).Encode(obj)
-	})
+	sendErr(w, http.StatusNotAcceptable)
+	return errors.New("client does not accept application/json")
 }
 
 // check if the given MIME type is acceptable as per Accept HTTP header
