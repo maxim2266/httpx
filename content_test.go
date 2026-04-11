@@ -41,7 +41,7 @@ func TestGzipAccepted(t *testing.T) {
 	}
 }
 
-func TestRespond(t *testing.T) {
+func TestServeContent(t *testing.T) {
 	tests := []struct {
 		name            string
 		method          string
@@ -162,7 +162,7 @@ func TestRespond(t *testing.T) {
 			err := ServeContent(w, req, tt.contentMaker)
 
 			if (err != nil) != tt.expectError {
-				t.Errorf("Respond() error = %v, expectError %v", err, tt.expectError)
+				t.Errorf("ServeContent() error = %v, expectError %v", err, tt.expectError)
 			}
 
 			if w.Code != tt.expectedStatus {
@@ -204,7 +204,7 @@ func TestRespond(t *testing.T) {
 }
 
 // large content to verify file backing
-func TestRespondLargeContent(t *testing.T) {
+func TestServeLargeContent(t *testing.T) {
 	largeData := strings.Repeat("a", 100000) // 100KB, triggers file backing
 
 	req := httptest.NewRequest(http.MethodPost, "/", nil)
@@ -216,7 +216,7 @@ func TestRespondLargeContent(t *testing.T) {
 	})
 
 	if err != nil {
-		t.Fatalf("Respond failed: %v", err)
+		t.Fatalf("ServeContent failed: %v", err)
 	}
 
 	if w.Code != http.StatusOK {
@@ -232,7 +232,7 @@ func TestRespondLargeContent(t *testing.T) {
 	}
 }
 
-func BenchmarkRespondWithIncreasingSizes(b *testing.B) {
+func BenchmarkServeContentWithIncreasingSizes(b *testing.B) {
 	// Test sizes: from small to large, crossing the 64KB buffer threshold
 	sizes := []struct {
 		name  string
@@ -272,7 +272,7 @@ func BenchmarkRespondWithIncreasingSizes(b *testing.B) {
 				})
 
 				if err != nil {
-					b.Fatalf("Respond failed: %v", err)
+					b.Fatalf("ServeContent failed: %v", err)
 				}
 
 				// verify content length

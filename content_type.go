@@ -80,23 +80,25 @@ func isSpace(b byte) bool {
 
 // split media type string on '/', with validation
 func splitMediaType(s string) (main, sub string, ok bool) {
-	if len(s) < 3 || !firstMTByte(s[0]) {
+	if len(s) < 3 || len(s) > 127+1+127 || !firstMTByte(s[0]) {
 		return
 	}
 
-	i, n := 1, min(len(s), 128)
+	i := 1
 
 	for s[i] != '/' {
 		if !otherMTByte(s[i]) {
 			return
 		}
 
-		if i++; i == n {
+		if i++; i == len(s) {
 			return
 		}
 	}
 
-	if main, sub = s[:i], s[i+1:]; len(sub) == 0 || len(sub) > 127 || !firstMTByte(sub[0]) {
+	main, sub = s[:i], s[i+1:]
+
+	if len(main) > 127 || len(sub) == 0 || len(sub) > 127 || !firstMTByte(sub[0]) {
 		return
 	}
 

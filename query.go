@@ -6,7 +6,7 @@ import (
 )
 
 // ParseQuery takes a raw query from the given URL, parses it, and returns an iterator
-// over the result that produces a sequence of key/value pairs.
+// over the result that yields a sequence of key/value pairs.
 func ParseQuery(u *url.URL) (iter.Seq2[string, string], error) {
 	m, err := url.ParseQuery(u.RawQuery)
 

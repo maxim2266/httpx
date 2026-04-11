@@ -30,9 +30,9 @@ func ServeContent(w http.ResponseWriter, r *http.Request, fn ContentMaker) (err 
 	defer b.recycle()
 
 	// invoke content maker
-	comp := gzipAccepted(r.Header.Get("Accept-Encoding"))
+	gz := canGzip(r.Header.Values("Accept-Encoding"))
 
-	if comp {
+	if gz {
 		contentType, err = gzipped(b, fn)
 	} else {
 		contentType, err = fn(b)
@@ -60,7 +60,7 @@ func ServeContent(w http.ResponseWriter, r *http.Request, fn ContentMaker) (err 
 	h.Set("Content-Length", strconv.FormatInt(contentLen, 10))
 	h.Set("Content-Type", cmp.Or(contentType, "application/octet-stream"))
 
-	if comp {
+	if gz {
 		h.Set("Content-Encoding", "gzip")
 	}
 
@@ -80,6 +80,16 @@ func gzipped(b *buffer, fn ContentMaker) (cont string, err error) {
 	}
 
 	return
+}
+
+func canGzip(headers []string) bool {
+	for _, h := range headers {
+		if gzipAccepted(h) {
+			return true
+		}
+	}
+
+	return false
 }
 
 const gzipRE = `(?i)(^|,)\s*(gzip(\s*;\s*q\s*=\s*(0?\.([1-9]\d{0,2})|1(\.0{0,3})?))?|\*)\s*(,|$)`
