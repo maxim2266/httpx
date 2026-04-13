@@ -238,6 +238,7 @@ func BenchmarkServeContentWithIncreasingSizes(b *testing.B) {
 		name  string
 		bytes int
 	}{
+		{"0KB", 0},
 		{"1KB", 1 * 1024},
 		{"8KB", 8 * 1024},
 		{"32KB", 32 * 1024},

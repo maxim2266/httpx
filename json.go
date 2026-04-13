@@ -2,7 +2,6 @@ package httpx
 
 import (
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 )
@@ -15,8 +14,7 @@ func ServeJson(w http.ResponseWriter, r *http.Request, fn func(*json.Encoder) er
 		})
 	}
 
-	sendErr(w, http.StatusNotAcceptable)
-	return errors.New("client does not accept " + jsonContentType)
+	return sendErrStr(w, http.StatusNotAcceptable, "client does not accept "+jsonContentType)
 }
 
 const jsonContentType = "application/json"

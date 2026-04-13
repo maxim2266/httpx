@@ -4,6 +4,8 @@ package httpx
 import (
 	"cmp"
 	"compress/gzip"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"regexp"
@@ -39,14 +41,12 @@ func ServeContent(w http.ResponseWriter, r *http.Request, fn ContentMaker) (err 
 	}
 
 	if err != nil {
-		sendErr(w, http.StatusInternalServerError)
-		return
+		return sendErr(w, http.StatusInternalServerError, err)
 	}
 
 	// flush the buffer
 	if contentLen, err = b.complete(); err != nil {
-		sendErr(w, http.StatusInternalServerError)
-		return
+		return sendErr(w, http.StatusInternalServerError, err)
 	}
 
 	if contentLen == 0 {
@@ -54,7 +54,7 @@ func ServeContent(w http.ResponseWriter, r *http.Request, fn ContentMaker) (err 
 		return
 	}
 
-	// HTTP headers
+	// HTTP header
 	h := w.Header()
 
 	h.Set("Content-Length", strconv.FormatInt(contentLen, 10))
@@ -67,7 +67,11 @@ func ServeContent(w http.ResponseWriter, r *http.Request, fn ContentMaker) (err 
 	w.WriteHeader(http.StatusOK)
 
 	// the actual write
-	return b.writeTo(w)
+	if r.Method != http.MethodHead {
+		err = b.writeTo(w)
+	}
+
+	return
 }
 
 func gzipped(b *buffer, fn ContentMaker) (cont string, err error) {
@@ -96,7 +100,13 @@ const gzipRE = `(?i)(^|,)\s*(gzip(\s*;\s*q\s*=\s*(0?\.([1-9]\d{0,2})|1(\.0{0,3})
 
 var gzipAccepted = regexp.MustCompile(gzipRE).MatchString
 
-// error writer
-func sendErr(w http.ResponseWriter, code int) {
+// error writers
+func sendErr(w http.ResponseWriter, code int, err error) error {
 	http.Error(w, http.StatusText(code), code)
+	return fmt.Errorf("(%d) %w", code, err)
+}
+
+func sendErrStr(w http.ResponseWriter, code int, msg string) error {
+	http.Error(w, http.StatusText(code), code)
+	return errors.New("(" + strconv.Itoa(code) + ") " + msg)
 }
