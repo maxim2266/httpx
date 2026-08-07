@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -75,8 +76,11 @@ func ServeContent(w http.ResponseWriter, r *http.Request, fn ContentMaker) (err 
 }
 
 func gzipped(b *buffer, fn ContentMaker) (cont string, err error) {
-	gz := gzip.NewWriter(b)
+	gz := compressorPool.Get().(*gzip.Writer)
 
+	defer compressorPool.Put(gz)
+
+	gz.Reset(b)
 	gz.Header.ModTime = time.Now()
 
 	if cont, err = fn(gz); err == nil {
@@ -99,6 +103,13 @@ func canGzip(headers []string) bool {
 const gzipRE = `(?i)(^|,)\s*(gzip(\s*;\s*q\s*=\s*(0?\.([1-9]\d{0,2})|1(\.0{0,3})?))?|\*)\s*(,|$)`
 
 var gzipAccepted = regexp.MustCompile(gzipRE).MatchString
+
+// pool of compressors
+var compressorPool = sync.Pool{
+	New: func() any {
+		return gzip.NewWriter(nil)
+	},
+}
 
 // error writers
 func sendErr(w http.ResponseWriter, code int, err error) error {

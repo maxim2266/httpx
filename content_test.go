@@ -130,6 +130,23 @@ func TestServeContent(t *testing.T) {
 			expectError: false,
 		},
 		{
+			name:   "gzip compression with compressor reuse",
+			method: http.MethodPost,
+			headers: map[string]string{
+				"Accept-Encoding": "gzip",
+			},
+			contentMaker: func(w io.Writer) (string, error) {
+				w.Write([]byte("hello world hello world"))
+				return "text/plain", nil
+			},
+			expectedStatus: http.StatusOK,
+			expectedHeaders: map[string]string{
+				"Content-Encoding": "gzip",
+				"Content-Type":     "text/plain",
+			},
+			expectError: false,
+		},
+		{
 			name:   "no gzip when not accepted",
 			method: http.MethodPost,
 			headers: map[string]string{
