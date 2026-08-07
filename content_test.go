@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -127,7 +128,8 @@ func TestServeContent(t *testing.T) {
 				"Content-Encoding": "gzip",
 				"Content-Type":     "text/plain",
 			},
-			expectError: false,
+			expectError:  false,
+			expectedBody: "hello world hello world",
 		},
 		{
 			name:   "gzip compression with compressor reuse",
@@ -136,7 +138,7 @@ func TestServeContent(t *testing.T) {
 				"Accept-Encoding": "gzip",
 			},
 			contentMaker: func(w io.Writer) (string, error) {
-				w.Write([]byte("hello world hello world"))
+				w.Write([]byte("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"))
 				return "text/plain", nil
 			},
 			expectedStatus: http.StatusOK,
@@ -144,7 +146,8 @@ func TestServeContent(t *testing.T) {
 				"Content-Encoding": "gzip",
 				"Content-Type":     "text/plain",
 			},
-			expectError: false,
+			expectError:  false,
+			expectedBody: "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
 		},
 		{
 			name:   "no gzip when not accepted",
@@ -179,45 +182,54 @@ func TestServeContent(t *testing.T) {
 			err := ServeContent(w, req, tt.contentMaker)
 
 			if (err != nil) != tt.expectError {
-				t.Errorf("ServeContent() error = %v, expectError %v", err, tt.expectError)
+				t.Fatalf("ServeContent() error = %v, expectError %v", err, tt.expectError)
 			}
 
 			if w.Code != tt.expectedStatus {
-				t.Errorf("status code = %v, want %v", w.Code, tt.expectedStatus)
+				t.Fatalf("status code = %v, want %v", w.Code, tt.expectedStatus)
 			}
 
 			for k, v := range tt.expectedHeaders {
 				if got := w.Header().Get(k); got != v {
-					t.Errorf("header %s = %v, want %v", k, got, v)
+					t.Fatalf("header %s = %v, want %v", k, got, v)
 				}
 			}
 
-			// handle gzipped response body
-			if tt.expectedHeaders["Content-Encoding"] == "gzip" {
-				reader, err := gzip.NewReader(w.Body)
+			// response body
+			var body string
 
-				if err != nil {
-					t.Fatalf("failed to create gzip reader: %v", err)
+			if w.Header().Get("Content-Encoding") == "gzip" {
+				if body, err = readGzipBody(w.Body); err != nil {
+					t.Fatal(err)
 				}
+			} else {
+				body = w.Body.String()
+			}
 
-				defer reader.Close()
-
-				decompressed, err := io.ReadAll(reader)
-
-				if err != nil {
-					t.Fatalf("failed to decompress: %v", err)
-				}
-
-				if len(decompressed) == 0 {
-					t.Errorf("decompressed content is empty")
-				}
-			} else if tt.expectedBody != "" {
-				if w.Body.String() != tt.expectedBody {
-					t.Errorf("body = %q, want %q", w.Body.String(), tt.expectedBody)
-				}
+			// check the body
+			if len(tt.expectedBody) > 0 && body != tt.expectedBody {
+				t.Fatalf("body = %q, want %q", body, tt.expectedBody)
 			}
 		})
 	}
+}
+
+func readGzipBody(src *bytes.Buffer) (string, error) {
+	reader, err := gzip.NewReader(src)
+
+	if err != nil {
+		return "", fmt.Errorf("creating gzip reader: %w", err)
+	}
+
+	defer reader.Close()
+
+	s, err := io.ReadAll(reader)
+
+	if err != nil {
+		return "", fmt.Errorf("reading gzip'ed content: %w", err)
+	}
+
+	return string(s), nil
 }
 
 // large content to verify file backing
