@@ -4,7 +4,6 @@ package httpx
 import (
 	"cmp"
 	"compress/gzip"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,7 +14,7 @@ import (
 )
 
 // ContentMaker is a function that writes the content to the given [io.Writer]
-// and returns Content-Type value as a string, or an error.
+// and returns Content-Type string, or an error.
 type ContentMaker = func(io.Writer) (string, error)
 
 // ServeContent calls the given [ContentMaker] function to generate (dynamic) content, and then
@@ -111,13 +110,8 @@ var compressorPool = sync.Pool{
 	},
 }
 
-// error writers
+// error writer
 func sendErr(w http.ResponseWriter, code int, err error) error {
 	http.Error(w, http.StatusText(code), code)
 	return fmt.Errorf("(%d) %w", code, err)
-}
-
-func sendErrStr(w http.ResponseWriter, code int, msg string) error {
-	http.Error(w, http.StatusText(code), code)
-	return errors.New("(" + strconv.Itoa(code) + ") " + msg)
 }

@@ -20,7 +20,7 @@ func allocBuffer() *buffer {
 	return bufferPool.Get().(*buffer)
 }
 
-// Write implements io.Writer interface.
+// Write implements [io.Writer] interface.
 func (b *buffer) Write(data []byte) (n int, err error) {
 	switch {
 	case len(data) == 0:
@@ -32,7 +32,7 @@ func (b *buffer) Write(data []byte) (n int, err error) {
 		return
 	}
 
-	// create temp. file if not yet
+	// create temporary file if not yet
 	if b.file == nil {
 		if b.file, err = os.CreateTemp(TempDir, "http-buffer-"); err != nil {
 			return

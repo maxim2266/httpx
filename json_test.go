@@ -1,7 +1,7 @@
 package httpx
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"net/http"
@@ -13,102 +13,86 @@ func TestServeJson(t *testing.T) {
 	tests := []struct {
 		name            string
 		acceptHeader    string
-		fn              func(*json.Encoder) error
+		fn              func(w io.Writer) error
 		wantStatus      int
 		wantContentType string
 		wantBody        string
 		wantErr         bool
 	}{
 		{
-			name:         "exact match - application/json accepted",
-			acceptHeader: "application/json",
-			fn: func(enc *json.Encoder) error {
-				return enc.Encode(map[string]string{"key": "value"})
-			},
+			name:            "exact match - application/json accepted",
+			acceptHeader:    "application/json",
+			fn:              marshalKV,
 			wantStatus:      http.StatusOK,
 			wantContentType: "application/json",
-			wantBody:        `{"key":"value"}` + "\n",
+			wantBody:        `{"key":"value"}`,
 			wantErr:         false,
 		},
 		{
-			name:         "wildcard subtype - application/* accepts json",
-			acceptHeader: "application/*",
-			fn: func(enc *json.Encoder) error {
-				return enc.Encode(map[string]string{"key": "value"})
-			},
+			name:            "wildcard subtype - application/* accepts json",
+			acceptHeader:    "application/*",
+			fn:              marshalKV,
 			wantStatus:      http.StatusOK,
 			wantContentType: "application/json",
-			wantBody:        `{"key":"value"}` + "\n",
+			wantBody:        `{"key":"value"}`,
 			wantErr:         false,
 		},
 		{
-			name:         "full wildcard - */* accepts json",
-			acceptHeader: "*/*",
-			fn: func(enc *json.Encoder) error {
-				return enc.Encode(map[string]string{"key": "value"})
-			},
+			name:            "full wildcard - */* accepts json",
+			acceptHeader:    "*/*",
+			fn:              marshalKV,
 			wantStatus:      http.StatusOK,
 			wantContentType: "application/json",
-			wantBody:        `{"key":"value"}` + "\n",
+			wantBody:        `{"key":"value"}`,
 			wantErr:         false,
 		},
 		{
-			name:         "multiple types - json later in list",
-			acceptHeader: "text/html, application/json;q=0.9, */*;q=0.8",
-			fn: func(enc *json.Encoder) error {
-				return enc.Encode(map[string]string{"key": "value"})
-			},
+			name:            "multiple types - json later in list",
+			acceptHeader:    "text/html, application/json;q=0.9, */*;q=0.8",
+			fn:              marshalKV,
 			wantStatus:      http.StatusOK,
 			wantContentType: "application/json",
-			wantBody:        `{"key":"value"}` + "\n",
+			wantBody:        `{"key":"value"}`,
 			wantErr:         false,
 		},
 		{
-			name:         "empty accept header - accepts everything",
-			acceptHeader: "",
-			fn: func(enc *json.Encoder) error {
-				return enc.Encode(map[string]string{"key": "value"})
-			},
+			name:            "empty accept header - accepts everything",
+			acceptHeader:    "",
+			fn:              marshalKV,
 			wantStatus:      http.StatusOK,
 			wantContentType: "application/json",
-			wantBody:        `{"key":"value"}` + "\n",
+			wantBody:        `{"key":"value"}`,
 			wantErr:         false,
 		},
 		{
 			name:         "no matching accept type",
 			acceptHeader: "text/html, application/xml",
-			fn: func(enc *json.Encoder) error {
-				return enc.Encode(map[string]string{"key": "value"})
-			},
-			wantStatus: http.StatusNotAcceptable,
-			wantBody:   "Not Acceptable\n",
-			wantErr:    true,
+			fn:           marshalKV,
+			wantStatus:   http.StatusNotAcceptable,
+			wantBody:     "Not Acceptable\n",
+			wantErr:      true,
 		},
 		{
 			name:         "q=0 for json - not acceptable",
 			acceptHeader: "application/json;q=0, text/html",
-			fn: func(enc *json.Encoder) error {
-				return enc.Encode(map[string]string{"key": "value"})
-			},
-			wantStatus: http.StatusNotAcceptable,
-			wantBody:   "Not Acceptable\n",
-			wantErr:    true,
+			fn:           marshalKV,
+			wantStatus:   http.StatusNotAcceptable,
+			wantBody:     "Not Acceptable\n",
+			wantErr:      true,
 		},
 		{
-			name:         "malformed accept header - skips and finds match",
-			acceptHeader: "invalid;q=1.0, application/json",
-			fn: func(enc *json.Encoder) error {
-				return enc.Encode(map[string]string{"key": "value"})
-			},
+			name:            "malformed accept header - skips and finds match",
+			acceptHeader:    "invalid;q=1.0, application/json",
+			fn:              marshalKV,
 			wantStatus:      http.StatusOK,
 			wantContentType: "application/json",
-			wantBody:        `{"key":"value"}` + "\n",
+			wantBody:        `{"key":"value"}`,
 			wantErr:         false,
 		},
 		{
 			name:         "fn returns error",
 			acceptHeader: "application/json",
-			fn: func(enc *json.Encoder) error {
+			fn: func(w io.Writer) error {
 				return errors.New("encoding failed")
 			},
 			wantStatus: http.StatusInternalServerError,
@@ -116,25 +100,21 @@ func TestServeJson(t *testing.T) {
 			wantErr:    true,
 		},
 		{
-			name:         "case insensitive match",
-			acceptHeader: "Application/Json",
-			fn: func(enc *json.Encoder) error {
-				return enc.Encode(map[string]string{"key": "value"})
-			},
+			name:            "case insensitive match",
+			acceptHeader:    "Application/Json",
+			fn:              marshalKV,
 			wantStatus:      http.StatusOK,
 			wantContentType: "application/json",
-			wantBody:        `{"key":"value"}` + "\n",
+			wantBody:        `{"key":"value"}`,
 			wantErr:         false,
 		},
 		{
-			name:         "json with charset parameter",
-			acceptHeader: "application/json;charset=utf-8",
-			fn: func(enc *json.Encoder) error {
-				return enc.Encode(map[string]string{"key": "value"})
-			},
+			name:            "json with charset parameter",
+			acceptHeader:    "application/json;charset=utf-8",
+			fn:              marshalKV,
 			wantStatus:      http.StatusOK,
 			wantContentType: "application/json",
-			wantBody:        `{"key":"value"}` + "\n",
+			wantBody:        `{"key":"value"}`,
 			wantErr:         false,
 		},
 	}
@@ -175,3 +155,9 @@ func TestServeJson(t *testing.T) {
 		})
 	}
 }
+
+func marshalKV(w io.Writer) error {
+	return json.MarshalWrite(w, kv)
+}
+
+var kv = map[string]string{"key": "value"}
