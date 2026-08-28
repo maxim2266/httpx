@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestServeJson(t *testing.T) {
+func TestServeTypedContent(t *testing.T) {
 	tests := []struct {
 		name            string
 		acceptHeader    string
@@ -128,28 +128,28 @@ func TestServeJson(t *testing.T) {
 				r.Header.Set("Accept", tt.acceptHeader)
 			}
 
-			err := ServeJson(w, r, tt.fn)
+			err := ServeTypedContent(w, r, "application/json", tt.fn)
 
 			if (err != nil) != tt.wantErr {
-				t.Errorf("ServeJson() error = %v, wantErr %v", err, tt.wantErr)
+				t.Fatalf("ServeJson() error = %v, wantErr %v", err, tt.wantErr)
 			}
 
 			resp := w.Result()
 			defer resp.Body.Close()
 
 			if resp.StatusCode != tt.wantStatus {
-				t.Errorf("ServeJson() status = %v, want %v", resp.StatusCode, tt.wantStatus)
+				t.Fatalf("ServeJson() status = %v, want %v", resp.StatusCode, tt.wantStatus)
 			}
 
 			if tt.wantContentType != "" {
 				if ct := resp.Header.Get("Content-Type"); ct != tt.wantContentType {
-					t.Errorf("ServeJson() Content-Type = %v, want %v", ct, tt.wantContentType)
+					t.Fatalf("ServeJson() Content-Type = %v, want %v", ct, tt.wantContentType)
 				}
 			}
 
 			if tt.wantBody != "" {
 				if body, _ := io.ReadAll(resp.Body); string(body) != tt.wantBody {
-					t.Errorf("ServeJson() body = %q, want %q", string(body), tt.wantBody)
+					t.Fatalf("ServeJson() body = %q, want %q", string(body), tt.wantBody)
 				}
 			}
 		})

@@ -37,7 +37,7 @@ func TestGzipAccepted(t *testing.T) {
 
 	for _, tt := range tests {
 		if got := gzipAccepted(tt.header); got != tt.want {
-			t.Fatalf("CanCompress(%q) = %v; want %v", tt.header, got, tt.want)
+			t.Fatalf("gzipAccepted(%q) = %v; want %v", tt.header, got, tt.want)
 		}
 	}
 }
@@ -47,7 +47,8 @@ func TestServeContent(t *testing.T) {
 		name            string
 		method          string
 		headers         map[string]string
-		contentMaker    ContentMaker
+		contentMaker    func(io.Writer) error
+		contentType     string
 		expectedStatus  int
 		expectedHeaders map[string]string
 		expectedBody    string
@@ -58,10 +59,11 @@ func TestServeContent(t *testing.T) {
 			name:    "successful response without range",
 			method:  http.MethodPost,
 			headers: map[string]string{},
-			contentMaker: func(w io.Writer) (string, error) {
-				w.Write([]byte("hello world"))
-				return "text/plain", nil
+			contentMaker: func(w io.Writer) (err error) {
+				_, err = w.Write([]byte("hello world"))
+				return
 			},
+			contentType:    "text/plain",
 			expectedStatus: http.StatusOK,
 			expectedHeaders: map[string]string{
 				"Content-Type":   "text/plain",
@@ -74,28 +76,14 @@ func TestServeContent(t *testing.T) {
 			name:    "empty content without range",
 			method:  http.MethodPost,
 			headers: map[string]string{},
-			contentMaker: func(w io.Writer) (string, error) {
-				return "text/plain", nil
+			contentMaker: func(_ io.Writer) error {
+				return nil
 			},
+			contentType:     "text/plain",
 			expectedStatus:  http.StatusNoContent,
 			expectedHeaders: map[string]string{},
 			expectedBody:    "",
 			expectError:     false,
-		},
-		{
-			name:    "default content type when empty",
-			method:  http.MethodPost,
-			headers: map[string]string{},
-			contentMaker: func(w io.Writer) (string, error) {
-				w.Write([]byte("binary data"))
-				return "", nil
-			},
-			expectedStatus: http.StatusOK,
-			expectedHeaders: map[string]string{
-				"Content-Type": "application/octet-stream",
-			},
-			expectedBody: "binary data",
-			expectError:  false,
 		},
 
 		// content maker errors
@@ -103,8 +91,8 @@ func TestServeContent(t *testing.T) {
 			name:    "content maker returns error",
 			method:  http.MethodPost,
 			headers: map[string]string{},
-			contentMaker: func(w io.Writer) (string, error) {
-				return "", errors.New("generation failed")
+			contentMaker: func(w io.Writer) error {
+				return errors.New("generation failed")
 			},
 			expectedStatus:  http.StatusInternalServerError,
 			expectedHeaders: map[string]string{},
@@ -119,10 +107,11 @@ func TestServeContent(t *testing.T) {
 			headers: map[string]string{
 				"Accept-Encoding": "gzip",
 			},
-			contentMaker: func(w io.Writer) (string, error) {
-				w.Write([]byte("hello world hello world"))
-				return "text/plain", nil
+			contentMaker: func(w io.Writer) (err error) {
+				_, err = w.Write([]byte("hello world hello world"))
+				return
 			},
+			contentType:    "text/plain",
 			expectedStatus: http.StatusOK,
 			expectedHeaders: map[string]string{
 				"Content-Encoding": "gzip",
@@ -137,10 +126,11 @@ func TestServeContent(t *testing.T) {
 			headers: map[string]string{
 				"Accept-Encoding": "gzip",
 			},
-			contentMaker: func(w io.Writer) (string, error) {
-				w.Write([]byte("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"))
-				return "text/plain", nil
+			contentMaker: func(w io.Writer) (err error) {
+				_, err = w.Write([]byte("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"))
+				return
 			},
+			contentType:    "text/plain",
 			expectedStatus: http.StatusOK,
 			expectedHeaders: map[string]string{
 				"Content-Encoding": "gzip",
@@ -155,10 +145,11 @@ func TestServeContent(t *testing.T) {
 			headers: map[string]string{
 				"Accept-Encoding": "deflate",
 			},
-			contentMaker: func(w io.Writer) (string, error) {
-				w.Write([]byte("hello world"))
-				return "text/plain", nil
+			contentMaker: func(w io.Writer) (err error) {
+				_, err = w.Write([]byte("hello world"))
+				return
 			},
+			contentType:    "text/plain",
 			expectedStatus: http.StatusOK,
 			expectedHeaders: map[string]string{
 				"Content-Encoding": "",
@@ -179,6 +170,9 @@ func TestServeContent(t *testing.T) {
 			}
 
 			w := httptest.NewRecorder()
+
+			w.HeaderMap.Add("Content-Type", tt.contentType)
+
 			err := ServeContent(w, req, tt.contentMaker)
 
 			if (err != nil) != tt.expectError {
@@ -238,10 +232,9 @@ func TestServeLargeContent(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/", nil)
 	w := httptest.NewRecorder()
-
-	err := ServeContent(w, req, func(wr io.Writer) (string, error) {
-		wr.Write([]byte(largeData))
-		return "text/plain", nil
+	err := ServeContent(w, req, func(wr io.Writer) (err error) {
+		_, err = wr.Write([]byte(largeData))
+		return
 	})
 
 	if err != nil {
@@ -249,15 +242,15 @@ func TestServeLargeContent(t *testing.T) {
 	}
 
 	if w.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", w.Code)
+		t.Fatalf("expected 200, got %d", w.Code)
 	}
 
 	if w.Header().Get("Content-Length") != "100000" {
-		t.Errorf("Content-Length = %s, want 100000", w.Header().Get("Content-Length"))
+		t.Fatalf("Content-Length = %s, want 100000", w.Header().Get("Content-Length"))
 	}
 
 	if w.Body.Len() != 100000 {
-		t.Errorf("body length = %d, want 100000", w.Body.Len())
+		t.Fatalf("body length = %d, want 100000", w.Body.Len())
 	}
 }
 
@@ -296,9 +289,9 @@ func BenchmarkServeContentWithIncreasingSizes(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				var w discardWriter
 
-				err := ServeContent(&w, req, func(wr io.Writer) (string, error) {
-					wr.Write(testData)
-					return "text/plain", nil
+				err := ServeContent(&w, req, func(wr io.Writer) (err error) {
+					_, err = wr.Write(testData)
+					return
 				})
 
 				if err != nil {

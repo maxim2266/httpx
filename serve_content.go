@@ -2,7 +2,6 @@
 package httpx
 
 import (
-	"cmp"
 	"compress/gzip"
 	"fmt"
 	"io"
@@ -13,19 +12,10 @@ import (
 	"time"
 )
 
-// ContentMaker is a function that writes the content to the given [io.Writer]
-// and returns Content-Type string, or an error.
-type ContentMaker = func(io.Writer) (string, error)
-
-// ServeContent calls the given [ContentMaker] function to generate (dynamic) content, and then
+// ServeContent calls the given function to generate (dynamic) content, and then
 // writes the content to the given [http.ResponseWriter], while handling other aspects of the
 // response delivery (like error processing, buffering, and setting HTTP headers) internally.
-func ServeContent(w http.ResponseWriter, r *http.Request, fn ContentMaker) (err error) {
-	var (
-		contentType string
-		contentLen  int64
-	)
-
+func ServeContent(w http.ResponseWriter, r *http.Request, fn func(io.Writer) error) (err error) {
 	// buffer
 	b := allocBuffer()
 
@@ -35,9 +25,9 @@ func ServeContent(w http.ResponseWriter, r *http.Request, fn ContentMaker) (err 
 	gz := canGzip(r.Header.Values("Accept-Encoding"))
 
 	if gz {
-		contentType, err = gzipped(b, fn)
+		err = gzipped(b, fn)
 	} else {
-		contentType, err = fn(b)
+		err = fn(b)
 	}
 
 	if err != nil {
@@ -45,6 +35,8 @@ func ServeContent(w http.ResponseWriter, r *http.Request, fn ContentMaker) (err 
 	}
 
 	// flush the buffer
+	var contentLen int64
+
 	if contentLen, err = b.complete(); err != nil {
 		return sendErr(w, http.StatusInternalServerError, err)
 	}
@@ -58,7 +50,6 @@ func ServeContent(w http.ResponseWriter, r *http.Request, fn ContentMaker) (err 
 	h := w.Header()
 
 	h.Set("Content-Length", strconv.FormatInt(contentLen, 10))
-	h.Set("Content-Type", cmp.Or(contentType, "application/octet-stream"))
 
 	if gz {
 		h.Set("Content-Encoding", "gzip")
@@ -74,7 +65,7 @@ func ServeContent(w http.ResponseWriter, r *http.Request, fn ContentMaker) (err 
 	return
 }
 
-func gzipped(b *buffer, fn ContentMaker) (cont string, err error) {
+func gzipped(b *buffer, fn func(io.Writer) error) (err error) {
 	gz := compressorPool.Get().(*gzip.Writer)
 
 	defer compressorPool.Put(gz)
@@ -82,7 +73,7 @@ func gzipped(b *buffer, fn ContentMaker) (cont string, err error) {
 	gz.Reset(b)
 	gz.Header.ModTime = time.Now()
 
-	if cont, err = fn(gz); err == nil {
+	if err = fn(gz); err == nil {
 		err = gz.Close()
 	}
 
