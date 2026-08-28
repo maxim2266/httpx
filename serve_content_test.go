@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 )
 
@@ -228,12 +227,12 @@ func readGzipBody(src *bytes.Buffer) (string, error) {
 
 // large content to verify file backing
 func TestServeLargeContent(t *testing.T) {
-	largeData := strings.Repeat("a", 100000) // 100KB, triggers file backing
+	data := bytes.Repeat([]byte("a"), 100000) // 100KB, triggers file backing
 
 	req := httptest.NewRequest(http.MethodPost, "/", nil)
 	w := httptest.NewRecorder()
 	err := ServeContent(w, req, func(wr io.Writer) (err error) {
-		_, err = wr.Write([]byte(largeData))
+		_, err = wr.Write(data)
 		return
 	})
 
@@ -251,6 +250,10 @@ func TestServeLargeContent(t *testing.T) {
 
 	if w.Body.Len() != 100000 {
 		t.Fatalf("body length = %d, want 100000", w.Body.Len())
+	}
+
+	if !bytes.Equal(w.Body.Bytes(), data) {
+		t.Fatal("content mismatch")
 	}
 }
 
@@ -278,6 +281,7 @@ func BenchmarkServeContentWithIncreasingSizes(b *testing.B) {
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	w := discardWriter{header: make(http.Header)}
 
 	for _, size := range sizes {
 		b.Run(size.name, func(b *testing.B) {
@@ -287,7 +291,7 @@ func BenchmarkServeContentWithIncreasingSizes(b *testing.B) {
 			b.ReportAllocs()
 
 			for i := 0; i < b.N; i++ {
-				var w discardWriter
+				w.reset()
 
 				err := ServeContent(&w, req, func(wr io.Writer) (err error) {
 					_, err = wr.Write(testData)
@@ -298,33 +302,38 @@ func BenchmarkServeContentWithIncreasingSizes(b *testing.B) {
 					b.Fatalf("ServeContent failed: %v", err)
 				}
 
-				// verify content length
 				if w.size != size.bytes {
 					b.Fatalf("size mismatch: %d instead of %d", w.size, size.bytes)
+				}
+
+				if size.bytes > 0 && w.code != http.StatusOK {
+					b.Fatalf("unexpected HTTP code %d", w.code)
 				}
 			}
 		})
 	}
 }
 
-// helpers
 type discardWriter struct {
-	http.ResponseWriter
-	size int
+	size, code int
+	header     http.Header
 }
 
-func (w *discardWriter) Write(p []byte) (int, error) {
-	w.size += len(p)
-	return len(p), nil
+func (w *discardWriter) reset() {
+	w.size = 0
+	w.code = 0
+	clear(w.header)
 }
 
 func (w *discardWriter) Header() http.Header {
-	if w.ResponseWriter == nil {
-		return make(http.Header)
-	}
-	return w.ResponseWriter.Header()
+	return w.header
 }
 
-func (w *discardWriter) WriteHeader(_ int) {
-	// do nothing
+func (w *discardWriter) Write(s []byte) (int, error) {
+	w.size += len(s)
+	return len(s), nil
+}
+
+func (w *discardWriter) WriteHeader(statusCode int) {
+	w.code = statusCode
 }
