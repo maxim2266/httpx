@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"strconv"
 )
 
 // ServeTypedContent checks if the client accepts the given content type, and then
@@ -21,14 +20,8 @@ func ServeTypedContent(
 		return ServeContent(w, r, fn)
 	}
 
-	return sendErrStr(
-		w,
-		http.StatusNotAcceptable,
-		`client does not accept content of type "`+contentType+`"`,
-	)
-}
+	sendHttpErr(w, http.StatusNotAcceptable)
 
-func sendErrStr(w http.ResponseWriter, code int, msg string) error {
-	http.Error(w, http.StatusText(code), code)
-	return errors.New("(" + strconv.Itoa(code) + ") " + msg)
+	return errors.New(`httpx.ServeTypedContent: (406) client does not accept content of type "` +
+		contentType + `"`)
 }

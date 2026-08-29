@@ -32,14 +32,14 @@ func ServeContent(w http.ResponseWriter, r *http.Request, fn func(io.Writer) err
 	}
 
 	if err != nil {
-		return sendErr(w, http.StatusInternalServerError, err)
+		return fail(w, http.StatusInternalServerError, err)
 	}
 
 	// flush the buffer
 	var contentLen int64
 
 	if contentLen, err = b.flush(); err != nil {
-		return sendErr(w, http.StatusInternalServerError, err)
+		return fail(w, http.StatusInternalServerError, err)
 	}
 
 	if contentLen == 0 {
@@ -60,7 +60,9 @@ func ServeContent(w http.ResponseWriter, r *http.Request, fn func(io.Writer) err
 
 	// the actual write
 	if r.Method != http.MethodHead {
-		err = b.writeTo(w)
+		if err = b.writeTo(w); err != nil {
+			err = fmt.Errorf("httpx.ServeContent: %w", err)
+		}
 	}
 
 	return
@@ -92,8 +94,12 @@ var compressorPool = sync.Pool{
 	},
 }
 
-// error writer
-func sendErr(w http.ResponseWriter, code int, err error) error {
+// error writers
+func sendHttpErr(w http.ResponseWriter, code int) {
 	http.Error(w, http.StatusText(code), code)
-	return fmt.Errorf("(%d) %w", code, err)
+}
+
+func fail(w http.ResponseWriter, code int, err error) error {
+	sendHttpErr(w, code)
+	return fmt.Errorf("httpx.ServeContent: (%d) %w", code, err)
 }

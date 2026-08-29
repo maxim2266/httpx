@@ -65,10 +65,46 @@ func (b *buffer) WriteString(s string) (int, error) {
 }
 
 func (b *buffer) writeTo(w io.Writer) (err error) {
+	// buffer-only write
 	if b.file == nil {
-		_, err = w.Write(b.buff[:b.wi])
-	} else if _, err = b.file.Seek(0, io.SeekStart); err == nil {
-		_, err = b.file.WriteTo(w)
+		if b.wi > 0 {
+			var n int
+
+			if n, err = w.Write(b.buff[:b.wi]); err == nil && n != b.wi {
+				err = io.ErrShortWrite
+			}
+		}
+
+		return
+	}
+
+	// rewind the file
+	if _, err = b.file.Seek(0, io.SeekStart); err != nil {
+		return
+	}
+
+	// for HTTPS/TLS file.WriteTo allocates a buffer for copying,
+	// but here we have already got the buffer we can use
+	buff := b.buff[:]
+
+	// unfortunately, io.CopyBuffer still wants to call file.WriteTo method,
+	// so have to implement the copy loop here
+	var nr, nw int
+
+	for nr, err = b.file.Read(buff); err == nil; nr, err = b.file.Read(buff) {
+		if nr > 0 {
+			if nw, err = w.Write(buff[:nr]); err != nil {
+				return
+			}
+
+			if nw != nr {
+				return io.ErrShortWrite
+			}
+		}
+	}
+
+	if err == io.EOF {
+		err = nil
 	}
 
 	return

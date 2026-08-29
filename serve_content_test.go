@@ -283,6 +283,7 @@ func BenchmarkServeContentWithIncreasingSizes(b *testing.B) {
 
 	for _, size := range sizes {
 		b.Run(formatSize(size), func(b *testing.B) {
+			b.ReportAllocs()
 			b.ResetTimer()
 
 			for i := 0; i < b.N; i++ {
