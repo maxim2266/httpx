@@ -38,7 +38,7 @@ func ServeContent(w http.ResponseWriter, r *http.Request, fn func(io.Writer) err
 	// flush the buffer
 	var contentLen int64
 
-	if contentLen, err = b.complete(); err != nil {
+	if contentLen, err = b.flush(); err != nil {
 		return sendErr(w, http.StatusInternalServerError, err)
 	}
 
