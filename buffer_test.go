@@ -98,16 +98,16 @@ func BenchmarkBufferMemoryVsFile(b *testing.B) {
 		1024 * 1024,
 	}
 
+	data := bytes.Repeat([]byte("x"), sizes[len(sizes)-1])
+
 	for _, size := range sizes {
 		b.Run(formatSize(size), func(b *testing.B) {
-			testData := bytes.Repeat([]byte("x"), size)
-
-			b.ResetTimer()
 			b.ReportAllocs()
+			b.ResetTimer()
 
 			for i := 0; i < b.N; i++ {
 				buf := allocBuffer()
-				buf.Write(testData)
+				buf.Write(data[:size])
 				buf.complete()
 				buf.writeTo(io.Discard)
 				buf.recycle()

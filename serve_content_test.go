@@ -259,54 +259,50 @@ func TestServeLargeContent(t *testing.T) {
 
 func BenchmarkServeContentWithIncreasingSizes(b *testing.B) {
 	// Test sizes: from small to large, crossing the 64KB buffer threshold
-	sizes := []struct {
-		name  string
-		bytes int
-	}{
-		{"0KB", 0},
-		{"1KB", 1 * 1024},
-		{"8KB", 8 * 1024},
-		{"32KB", 32 * 1024},
-		{"64KB", 64 * 1024}, // buffer limit
-		{"65KB", 65 * 1024}, // just over - file backing
-		{"128KB", 128 * 1024},
-		{"256KB", 256 * 1024},
-		{"512KB", 512 * 1024},
-		{"1MB", 1 * 1024 * 1024},
-		{"2MB", 2 * 1024 * 1024},
-		{"4MB", 4 * 1024 * 1024},
-		{"8MB", 8 * 1024 * 1024},
-		{"16MB", 16 * 1024 * 1024},
-		{"32MB", 32 * 1024 * 1024},
+	sizes := []int{
+		0,
+		1 * 1024,
+		8 * 1024,
+		32 * 1024,
+		64 * 1024, // buffer limit
+		65 * 1024, // just over - file backing
+		128 * 1024,
+		256 * 1024,
+		512 * 1024,
+		1 * 1024 * 1024,
+		2 * 1024 * 1024,
+		4 * 1024 * 1024,
+		8 * 1024 * 1024,
+		16 * 1024 * 1024,
+		32 * 1024 * 1024,
 	}
 
+	data := bytes.Repeat([]byte("x"), sizes[len(sizes)-1])
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	w := discardWriter{header: make(http.Header)}
 
 	for _, size := range sizes {
-		b.Run(size.name, func(b *testing.B) {
-			testData := bytes.Repeat([]byte("x"), size.bytes)
-
+		b.Run(formatSize(size), func(b *testing.B) {
 			b.ResetTimer()
-			b.ReportAllocs()
 
 			for i := 0; i < b.N; i++ {
 				w.reset()
 
-				err := ServeContent(&w, req, func(wr io.Writer) (err error) {
-					_, err = wr.Write(testData)
+				err := ServeContent(&w, req, func(wr io.Writer) (e error) {
+					_, e = wr.Write(data[:size])
 					return
 				})
 
 				if err != nil {
-					b.Fatalf("ServeContent failed: %v", err)
+					b.Fatalf("%d - %v", size, err)
 				}
 
-				if w.size != size.bytes {
-					b.Fatalf("size mismatch: %d instead of %d", w.size, size.bytes)
+				if w.size != size {
+					b.Fatalf("size mismatch: %d instead of %d", w.size, size)
 				}
 
-				if size.bytes > 0 && w.code != http.StatusOK {
+				if (size > 0 && w.code != http.StatusOK) ||
+					(size == 0 && w.code != http.StatusNoContent) {
 					b.Fatalf("unexpected HTTP code %d", w.code)
 				}
 			}

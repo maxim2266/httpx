@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -22,7 +23,7 @@ func ServeContent(w http.ResponseWriter, r *http.Request, fn func(io.Writer) err
 	defer b.recycle()
 
 	// invoke content maker
-	gz := canGzip(r.Header.Values("Accept-Encoding"))
+	gz := slices.ContainsFunc(r.Header.Values("Accept-Encoding"), gzipAccepted)
 
 	if gz {
 		err = gzipped(b, fn)
@@ -78,16 +79,6 @@ func gzipped(b *buffer, fn func(io.Writer) error) (err error) {
 	}
 
 	return
-}
-
-func canGzip(headers []string) bool {
-	for _, h := range headers {
-		if gzipAccepted(h) {
-			return true
-		}
-	}
-
-	return false
 }
 
 const gzipRE = `(?i)(^|,)\s*(gzip(\s*;\s*q\s*=\s*(0?\.([1-9]\d{0,2})|1(\.0{0,3})?))?|\*)\s*(,|$)`
