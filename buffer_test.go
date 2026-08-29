@@ -9,11 +9,11 @@ import (
 )
 
 func TestBufferSmall(t *testing.T) {
-	data := []byte("this is a test")
 	b := allocBuffer()
 
 	defer b.recycle()
 
+	data := []byte("this is a test")
 	n, err := b.Write(data)
 
 	if err != nil {
@@ -41,6 +41,43 @@ func TestBufferSmall(t *testing.T) {
 	}
 
 	if s := res.Bytes(); !bytes.Equal(s, data) {
+		t.Fatalf(`result: "%s" instead of "%s"`, s, data)
+	}
+}
+
+func TestBufferSmallString(t *testing.T) {
+	b := allocBuffer()
+
+	defer b.recycle()
+
+	data := "this is a test"
+	n, err := b.WriteString(data)
+
+	if err != nil {
+		t.Fatalf("WriteString: %s", err)
+	}
+
+	if n != len(data) {
+		t.Fatalf("WriteString: length %d instead of %d", n, len(data))
+	}
+
+	size, err := b.flush()
+
+	if err != nil {
+		t.Fatalf("flush: %s", err)
+	}
+
+	if size != int64(len(data)) {
+		t.Fatalf("flush: length %d instead of %d", size, len(data))
+	}
+
+	var res bytes.Buffer
+
+	if err = b.writeTo(&res); err != nil {
+		t.Fatalf("writeTo: %s", err)
+	}
+
+	if s := res.String(); s != data {
 		t.Fatalf(`result: "%s" instead of "%s"`, s, data)
 	}
 }

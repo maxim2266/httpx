@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"sync"
+	"unsafe"
 )
 
 // TempDir is a pathname of the directory to use for temporary files. Empty string (default value)
@@ -56,6 +57,11 @@ func (b *buffer) Write(data []byte) (n int, err error) {
 	}
 
 	return b.file.Write(data)
+}
+
+// WriteString implements [io.StringWriter] interface.
+func (b *buffer) WriteString(s string) (int, error) {
+	return b.Write(unsafe.Slice(unsafe.StringData(s), len(s)))
 }
 
 func (b *buffer) writeTo(w io.Writer) (err error) {
