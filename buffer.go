@@ -1,8 +1,10 @@
 package httpx
 
 import (
+	"errors"
 	"io"
 	"os"
+	"strconv"
 	"sync"
 	"unsafe"
 )
@@ -71,7 +73,7 @@ func (b *buffer) writeTo(w io.Writer) (err error) {
 			var n int
 
 			if n, err = w.Write(b.buff[:b.wi]); err == nil && n != b.wi {
-				err = io.ErrShortWrite
+				err = errBadWrite(b.wi, n)
 			}
 		}
 
@@ -98,7 +100,7 @@ func (b *buffer) writeTo(w io.Writer) (err error) {
 			}
 
 			if nw != nr {
-				return io.ErrShortWrite
+				return errBadWrite(nr, nw)
 			}
 		}
 	}
@@ -144,4 +146,11 @@ var bufferPool = sync.Pool{
 	New: func() any {
 		return new(buffer)
 	},
+}
+
+func errBadWrite(wanted, actual int) error {
+	return errors.New("invalid write: wanted " +
+		strconv.Itoa(wanted) +
+		" bytes, but actually wrote " +
+		strconv.Itoa(actual))
 }
