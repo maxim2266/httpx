@@ -2,50 +2,103 @@ package httpx
 
 import (
 	"bytes"
+	"errors"
 	"io"
-	"slices"
+	"math/rand"
+	"os"
 	"strconv"
 	"testing"
 )
 
-func TestBufferSmall(t *testing.T) {
-	b := allocBuffer()
-
-	defer b.recycle()
-
-	data := []byte("this is a test")
-	n, err := b.Write(data)
-
-	if err != nil {
-		t.Fatalf("Write: %s", err)
+func TestBuffer(t *testing.T) {
+	sizes := [...]int{
+		0,
+		2749,
+		4096,
+		7919,
+		httpBufferSize - 1,
+		httpBufferSize,
+		httpBufferSize + 1,
+		httpBufferSize + 7919,
+		2*httpBufferSize - 1,
+		2 * httpBufferSize,
+		2*httpBufferSize + 1,
+		2*httpBufferSize + 7919,
 	}
 
-	if n != len(data) {
-		t.Fatalf("Write: length %d instead of %d", n, len(data))
-	}
+	data := make([]byte, sizes[len(sizes)-1])
 
-	size, err := b.flush()
-
-	if err != nil {
-		t.Fatalf("flush: %s", err)
-	}
-
-	if size != int64(len(data)) {
-		t.Fatalf("flush: length %d instead of %d", size, len(data))
+	for i := range len(data) {
+		data[i] = 'a' + byte(rand.Int()%26)
 	}
 
 	var res bytes.Buffer
 
-	if err = b.writeTo(&res); err != nil {
-		t.Fatalf("writeTo: %s", err)
-	}
+	res.Grow(len(data))
 
-	if s := res.Bytes(); !bytes.Equal(s, data) {
-		t.Fatalf(`result: "%s" instead of "%s"`, s, data)
+	for no, size := range sizes {
+		src := data[len(data)-size:] // ensure different data at the start of the buffer
+		b := allocBuffer()
+
+		// chunked write
+		chunkSize := size / 7
+
+		for i := 0; i < size; i += chunkSize {
+			nreq := min(chunkSize, size-i)
+			nact, err := b.Write(src[i : i+nreq])
+
+			if err != nil {
+				t.Fatalf("(%d) Write @ %d: %s", no, i, err)
+			}
+
+			if nact != nreq {
+				t.Fatalf("(%d) Write @ %d: written %d bytes instead of %d", no, i, nact, nreq)
+			}
+		}
+
+		// flush
+		count, err := b.flush()
+
+		if err != nil {
+			t.Fatalf("(%d) flush: %s", no, err)
+		}
+
+		if int64(size) != count {
+			t.Fatalf("(%d) flush: written %d bytes instead of %d", no, count, size)
+		}
+
+		// write result
+		res.Reset()
+
+		if err = b.writeTo(&res); err != nil {
+			t.Fatalf("(%d) writeTo: %s", no, err)
+		}
+
+		// compare
+		if !bytes.Equal(src, res.Bytes()) {
+			os.WriteFile("TestBuffer.in", src, 0600)
+			os.WriteFile("TestBuffer.out", res.Bytes(), 0600)
+			t.Fatalf("(%d) writeTo: data mismatch", no)
+		}
+
+		// recycle
+		var tmp string
+
+		if b.file != nil {
+			tmp = b.file.Name()
+		}
+
+		b.recycle()
+
+		if len(tmp) > 0 {
+			if _, err = os.Stat(tmp); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf(`(%d) temporary file "%s" is not deleted: %s`, no, tmp, err)
+			}
+		}
 	}
 }
 
-func TestBufferSmallString(t *testing.T) {
+func TestBufferString(t *testing.T) {
 	b := allocBuffer()
 
 	defer b.recycle()
@@ -82,47 +135,6 @@ func TestBufferSmallString(t *testing.T) {
 	}
 }
 
-func TestBufferLarge(t *testing.T) {
-	const N = 32*1024 + 5
-
-	data := []byte("_xyz/")
-	b := allocBuffer()
-
-	defer b.recycle()
-
-	for i := range N {
-		n, err := b.Write(data)
-
-		if err != nil {
-			t.Fatalf("(%d) Write: %s", i, err)
-		}
-
-		if n != len(data) {
-			t.Fatalf("(%d) Write: length %d instead of %d", i, n, len(data))
-		}
-	}
-
-	n, err := b.flush()
-
-	if err != nil {
-		t.Fatalf("flush: %s", err)
-	}
-
-	if data = slices.Repeat(data, N); n != int64(len(data)) {
-		t.Fatalf("flush: length %d instead of %d", n, len(data))
-	}
-
-	var res bytes.Buffer
-
-	if err = b.writeTo(&res); err != nil {
-		t.Fatalf("writeTo: %s", err)
-	}
-
-	if s := res.Bytes(); !bytes.Equal(s, data) {
-		t.Fatalf("result: mismatch, length %d (expected %d)", len(s), len(data))
-	}
-}
-
 // compare memory-only vs file-backed for different sizes
 func BenchmarkBufferMemoryVsFile(b *testing.B) {
 	sizes := []int{
@@ -133,6 +145,11 @@ func BenchmarkBufferMemoryVsFile(b *testing.B) {
 		256 * 1024,
 		512 * 1024,
 		1024 * 1024,
+		2 * 1024 * 1024,
+		4 * 1024 * 1024,
+		8 * 1024 * 1024,
+		16 * 1024 * 1024,
+		32 * 1024 * 1024,
 	}
 
 	data := bytes.Repeat([]byte("x"), sizes[len(sizes)-1])

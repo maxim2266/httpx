@@ -13,10 +13,12 @@ import (
 // means that the files are created in the directory returned from [os.TempDir] function.
 var TempDir string
 
+const httpBufferSize = 64 * 1024
+
 type buffer struct {
 	wi   int
 	file *os.File
-	buff [64 * 1024]byte
+	buff [httpBufferSize]byte
 }
 
 func allocBuffer() *buffer {
@@ -43,22 +45,25 @@ func (b *buffer) Write(data []byte) (n int, err error) {
 	}
 
 	// write existing bytes
-	if b.wi > 0 {
-		if _, err = b.file.Write(b.buff[:b.wi]); err != nil {
-			return
-		}
-
-		b.wi = 0
+	if err = write(b.file, b.buff[:b.wi]); err != nil {
+		return
 	}
 
 	// write the data
-	if len(data) < 1024 {
+	if len(data) <= 2*1024 {
 		n = copy(b.buff[:], data)
 		b.wi = n
 		return
 	}
 
-	return b.file.Write(data)
+	b.wi = 0
+
+	if err = write(b.file, data); err != nil {
+		return
+	}
+
+	n = len(data)
+	return
 }
 
 // WriteString implements [io.StringWriter] interface.
@@ -69,15 +74,7 @@ func (b *buffer) WriteString(s string) (int, error) {
 func (b *buffer) writeTo(w io.Writer) (err error) {
 	// buffer-only write
 	if b.file == nil {
-		if b.wi > 0 {
-			var n int
-
-			if n, err = w.Write(b.buff[:b.wi]); err == nil && n != b.wi {
-				err = errBadWrite(b.wi, n)
-			}
-		}
-
-		return
+		return write(w, b.buff[:b.wi])
 	}
 
 	// rewind the file
@@ -90,18 +87,12 @@ func (b *buffer) writeTo(w io.Writer) (err error) {
 	buff := b.buff[:]
 
 	// unfortunately, io.CopyBuffer still wants to call file.WriteTo method,
-	// so have to implement the copy loop here
-	var nr, nw int
+	// so we have to implement the copy loop here
+	var nr int
 
 	for nr, err = b.file.Read(buff); err == nil; nr, err = b.file.Read(buff) {
-		if nr > 0 {
-			if nw, err = w.Write(buff[:nr]); err != nil {
-				return
-			}
-
-			if nw != nr {
-				return errBadWrite(nr, nw)
-			}
+		if err = write(w, buff[:nr]); err != nil {
+			return
 		}
 	}
 
@@ -112,20 +103,17 @@ func (b *buffer) writeTo(w io.Writer) (err error) {
 	return
 }
 
-func (b *buffer) flush() (n int64, err error) {
+func (b *buffer) flush() (int64, error) {
 	if b.file == nil {
-		n = int64(b.wi)
-		return
+		return int64(b.wi), nil
 	}
 
 	// write remaining bytes
-	if b.wi > 0 {
-		if _, err = b.file.Write(b.buff[:b.wi]); err != nil {
-			return
-		}
-
-		b.wi = 0
+	if err := write(b.file, b.buff[:b.wi]); err != nil {
+		return 0, err
 	}
+
+	b.wi = 0
 
 	// file size
 	return b.file.Seek(0, io.SeekCurrent)
@@ -142,15 +130,30 @@ func (b *buffer) recycle() {
 	bufferPool.Put(b)
 }
 
+func write(w io.Writer, buff []byte) error {
+	if len(buff) == 0 {
+		return nil
+	}
+
+	n, err := w.Write(buff)
+
+	if err != nil {
+		return err
+	}
+
+	// I'm not sure about this check, but it's present in the standard io.Copy routines
+	if n != len(buff) {
+		return errors.New("invalid write: wanted " +
+			strconv.Itoa(len(buff)) +
+			" bytes, but actually wrote " +
+			strconv.Itoa(n))
+	}
+
+	return nil
+}
+
 var bufferPool = sync.Pool{
 	New: func() any {
 		return new(buffer)
 	},
-}
-
-func errBadWrite(wanted, actual int) error {
-	return errors.New("invalid write: wanted " +
-		strconv.Itoa(wanted) +
-		" bytes, but actually wrote " +
-		strconv.Itoa(actual))
 }
