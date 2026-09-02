@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"sync"
 	"time"
+	"unsafe"
 )
 
 // ServeContent calls the given function to generate (dynamic) content, and then
@@ -68,19 +69,12 @@ func ServeContent(w http.ResponseWriter, r *http.Request, fn func(io.Writer) err
 	return
 }
 
-func gzipped(b *buffer, fn func(io.Writer) error) (err error) {
-	gz := compressorPool.Get().(*gzip.Writer)
+func gzipped(b *buffer, fn func(io.Writer) error) error {
+	c := makeCompressor(b)
 
-	defer compressorPool.Put(gz)
+	defer c.recycle()
 
-	gz.Reset(b)
-	gz.Header.ModTime = time.Now()
-
-	if err = fn(gz); err == nil {
-		err = gz.Close()
-	}
-
-	return
+	return c.apply(fn)
 }
 
 const gzipRE = `(?i)(^|,)\s*(gzip(\s*;\s*q\s*=\s*(0?\.([1-9]\d{0,2})|1(\.0{0,3})?))?|\*)\s*(,|$)`
@@ -92,6 +86,44 @@ var compressorPool = sync.Pool{
 	New: func() any {
 		return gzip.NewWriter(nil)
 	},
+}
+
+// gzip.Writer wrapper
+type compressor struct {
+	gz *gzip.Writer
+}
+
+func makeCompressor(w io.Writer) (c compressor) {
+	c = compressor{compressorPool.Get().(*gzip.Writer)}
+
+	c.gz.Reset(w)
+	c.gz.Header.ModTime = time.Now()
+	return c
+}
+
+func (c compressor) recycle() {
+	c.gz.Reset(nil) // cut off buffer connection to help gc
+	compressorPool.Put(c.gz)
+}
+
+func (c compressor) apply(fn func(io.Writer) error) (err error) {
+	if err = fn(c); err == nil {
+		err = c.gz.Close()
+	}
+
+	return
+}
+
+func (c compressor) Write(data []byte) (n int, err error) {
+	if len(data) > 0 {
+		n, err = c.gz.Write(data)
+	}
+
+	return
+}
+
+func (c compressor) WriteString(s string) (int, error) {
+	return c.Write(unsafe.Slice(unsafe.StringData(s), len(s)))
 }
 
 // error writers

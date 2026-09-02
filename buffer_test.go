@@ -26,11 +26,7 @@ func TestBuffer(t *testing.T) {
 		2*httpBufferSize + 7919,
 	}
 
-	data := make([]byte, sizes[len(sizes)-1])
-
-	for i := range len(data) {
-		data[i] = 'a' + byte(rand.Int()%26)
-	}
+	data := randByteSlice(sizes[len(sizes)-1])
 
 	var res bytes.Buffer
 
@@ -182,4 +178,14 @@ func formatSize(bytes int) string {
 	default:
 		return strconv.Itoa(bytes/(1024*1024*1024)) + "GB"
 	}
+}
+
+func randByteSlice(n int) (s []byte) {
+	s = make([]byte, n)
+
+	for i := range n {
+		s[i] = 'a' + byte(rand.Int()%26)
+	}
+
+	return
 }

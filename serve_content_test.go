@@ -42,53 +42,61 @@ func TestGzipAccepted(t *testing.T) {
 }
 
 func TestServeContent(t *testing.T) {
+	bigString := string(randByteSlice(100000))
+
 	tests := []struct {
 		name            string
-		method          string
 		headers         map[string]string
 		contentMaker    func(io.Writer) error
-		contentType     string
 		expectedStatus  int
 		expectedHeaders map[string]string
 		expectedBody    string
 		expectError     bool
 	}{
-		// no range header
+		// simple response w/o error
 		{
-			name:    "successful response without range",
-			method:  http.MethodPost,
+			name:    "successful response",
 			headers: map[string]string{},
 			contentMaker: func(w io.Writer) (err error) {
-				_, err = w.Write([]byte("hello world"))
+				_, err = io.WriteString(w, "hello world")
 				return
 			},
-			contentType:    "text/plain",
 			expectedStatus: http.StatusOK,
 			expectedHeaders: map[string]string{
-				"Content-Type":   "text/plain",
 				"Content-Length": "11",
 			},
 			expectedBody: "hello world",
 			expectError:  false,
 		},
 		{
+			name:    "successful response with big string",
+			headers: map[string]string{},
+			contentMaker: func(w io.Writer) (err error) {
+				_, err = io.WriteString(w, bigString)
+				return
+			},
+			expectedStatus: http.StatusOK,
+			expectedHeaders: map[string]string{
+				"Content-Length": "100000",
+			},
+			expectedBody: bigString,
+			expectError:  false,
+		},
+		{
 			name:    "empty content without range",
-			method:  http.MethodPost,
 			headers: map[string]string{},
 			contentMaker: func(_ io.Writer) error {
 				return nil
 			},
-			contentType:     "text/plain",
 			expectedStatus:  http.StatusNoContent,
 			expectedHeaders: map[string]string{},
 			expectedBody:    "",
 			expectError:     false,
 		},
 
-		// content maker errors
+		// content maker error
 		{
 			name:    "content maker returns error",
-			method:  http.MethodPost,
 			headers: map[string]string{},
 			contentMaker: func(w io.Writer) error {
 				return errors.New("generation failed")
@@ -101,58 +109,49 @@ func TestServeContent(t *testing.T) {
 
 		// gzip compression
 		{
-			name:   "gzip compression when accepted",
-			method: http.MethodPost,
+			name: "gzip compression when accepted",
 			headers: map[string]string{
 				"Accept-Encoding": "gzip",
 			},
 			contentMaker: func(w io.Writer) (err error) {
-				_, err = w.Write([]byte("hello world hello world"))
+				_, err = io.WriteString(w, "hello world")
 				return
 			},
-			contentType:    "text/plain",
 			expectedStatus: http.StatusOK,
 			expectedHeaders: map[string]string{
 				"Content-Encoding": "gzip",
-				"Content-Type":     "text/plain",
 			},
 			expectError:  false,
-			expectedBody: "hello world hello world",
+			expectedBody: "hello world",
 		},
 		{
-			name:   "gzip compression with compressor reuse",
-			method: http.MethodPost,
+			name: "gzip compression with big string",
 			headers: map[string]string{
 				"Accept-Encoding": "gzip",
 			},
 			contentMaker: func(w io.Writer) (err error) {
-				_, err = w.Write([]byte("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"))
+				_, err = io.WriteString(w, bigString)
 				return
 			},
-			contentType:    "text/plain",
 			expectedStatus: http.StatusOK,
 			expectedHeaders: map[string]string{
 				"Content-Encoding": "gzip",
-				"Content-Type":     "text/plain",
 			},
 			expectError:  false,
-			expectedBody: "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+			expectedBody: bigString,
 		},
 		{
-			name:   "no gzip when not accepted",
-			method: http.MethodPost,
+			name: "no gzip when not accepted",
 			headers: map[string]string{
 				"Accept-Encoding": "deflate",
 			},
 			contentMaker: func(w io.Writer) (err error) {
-				_, err = w.Write([]byte("hello world"))
+				_, err = io.WriteString(w, "hello world")
 				return
 			},
-			contentType:    "text/plain",
 			expectedStatus: http.StatusOK,
 			expectedHeaders: map[string]string{
 				"Content-Encoding": "",
-				"Content-Type":     "text/plain",
 				"Content-Length":   "11",
 			},
 			expectedBody: "hello world",
@@ -162,16 +161,13 @@ func TestServeContent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(tt.method, "/", nil)
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
 
 			for k, v := range tt.headers {
 				req.Header.Set(k, v)
 			}
 
 			w := httptest.NewRecorder()
-
-			w.HeaderMap.Add("Content-Type", tt.contentType)
-
 			err := ServeContent(w, req, tt.contentMaker)
 
 			if (err != nil) != tt.expectError {
@@ -214,47 +210,17 @@ func readGzipBody(src *bytes.Buffer) (string, error) {
 		return "", fmt.Errorf("creating gzip reader: %w", err)
 	}
 
-	defer reader.Close()
-
 	s, err := io.ReadAll(reader)
 
 	if err != nil {
 		return "", fmt.Errorf("reading gzip'ed content: %w", err)
 	}
 
+	if err = reader.Close(); err != nil {
+		return "", fmt.Errorf("closing gzip: %w", err)
+	}
+
 	return string(s), nil
-}
-
-// large content to verify file backing
-func TestServeLargeContent(t *testing.T) {
-	data := bytes.Repeat([]byte("a"), 100000) // 100KB, triggers file backing
-
-	req := httptest.NewRequest(http.MethodPost, "/", nil)
-	w := httptest.NewRecorder()
-	err := ServeContent(w, req, func(wr io.Writer) (err error) {
-		_, err = wr.Write(data)
-		return
-	})
-
-	if err != nil {
-		t.Fatalf("ServeContent failed: %v", err)
-	}
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
-	}
-
-	if w.Header().Get("Content-Length") != "100000" {
-		t.Fatalf("Content-Length = %s, want 100000", w.Header().Get("Content-Length"))
-	}
-
-	if w.Body.Len() != 100000 {
-		t.Fatalf("body length = %d, want 100000", w.Body.Len())
-	}
-
-	if !bytes.Equal(w.Body.Bytes(), data) {
-		t.Fatal("content mismatch")
-	}
 }
 
 func BenchmarkServeContentWithIncreasingSizes(b *testing.B) {
