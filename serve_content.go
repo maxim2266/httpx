@@ -10,7 +10,6 @@ import (
 	"slices"
 	"strconv"
 	"sync"
-	"time"
 	"unsafe"
 )
 
@@ -27,7 +26,7 @@ func ServeContent(w http.ResponseWriter, r *http.Request, fn func(io.Writer) err
 	gz := slices.ContainsFunc(r.Header.Values("Accept-Encoding"), gzipAccepted)
 
 	if gz {
-		err = gzipped(b, fn)
+		err = compress(b, fn)
 	} else {
 		err = fn(b)
 	}
@@ -69,12 +68,19 @@ func ServeContent(w http.ResponseWriter, r *http.Request, fn func(io.Writer) err
 	return
 }
 
-func gzipped(b *buffer, fn func(io.Writer) error) error {
-	c := makeCompressor(b)
+func compress(b *buffer, fn func(io.Writer) error) (err error) {
+	c := compressorPool.Get().(*compressor)
 
 	defer c.recycle()
 
-	return c.apply(fn)
+	c.gz.Reset(b)
+
+	if err = c.apply(fn); err == nil && c.count == 0 {
+		// nothing has been written to the compressor - reset target buffer
+		b.wi = 0
+	}
+
+	return
 }
 
 const gzipRE = `(?i)(^|,)\s*(gzip(\s*;\s*q\s*=\s*(0?\.([1-9]\d{0,2})|1(\.0{0,3})?))?|\*)\s*(,|$)`
@@ -84,29 +90,25 @@ var gzipAccepted = regexp.MustCompile(gzipRE).MatchString
 // pool of compressors
 var compressorPool = sync.Pool{
 	New: func() any {
-		return gzip.NewWriter(nil)
+		return &compressor{
+			gz: gzip.NewWriter(io.Discard),
+		}
 	},
 }
 
 // gzip.Writer wrapper
 type compressor struct {
-	gz *gzip.Writer
+	gz    *gzip.Writer
+	count int64
 }
 
-func makeCompressor(w io.Writer) (c compressor) {
-	c = compressor{compressorPool.Get().(*gzip.Writer)}
-
-	c.gz.Reset(w)
-	c.gz.Header.ModTime = time.Now()
-	return c
+func (c *compressor) recycle() {
+	c.gz.Reset(io.Discard) // cut off buffer connection to help gc
+	c.count = 0
+	compressorPool.Put(c)
 }
 
-func (c compressor) recycle() {
-	c.gz.Reset(nil) // cut off buffer connection to help gc
-	compressorPool.Put(c.gz)
-}
-
-func (c compressor) apply(fn func(io.Writer) error) (err error) {
+func (c *compressor) apply(fn func(io.Writer) error) (err error) {
 	if err = fn(c); err == nil {
 		err = c.gz.Close()
 	}
@@ -114,15 +116,17 @@ func (c compressor) apply(fn func(io.Writer) error) (err error) {
 	return
 }
 
-func (c compressor) Write(data []byte) (n int, err error) {
+func (c *compressor) Write(data []byte) (n int, err error) {
 	if len(data) > 0 {
-		n, err = c.gz.Write(data)
+		if n, err = c.gz.Write(data); err == nil {
+			c.count += int64(n)
+		}
 	}
 
 	return
 }
 
-func (c compressor) WriteString(s string) (int, error) {
+func (c *compressor) WriteString(s string) (int, error) {
 	return c.Write(unsafe.Slice(unsafe.StringData(s), len(s)))
 }
 

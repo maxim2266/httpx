@@ -83,7 +83,7 @@ func TestServeContent(t *testing.T) {
 			expectError:  false,
 		},
 		{
-			name:    "empty content without range",
+			name:    "empty content",
 			headers: map[string]string{},
 			contentMaker: func(_ io.Writer) error {
 				return nil
@@ -139,6 +139,18 @@ func TestServeContent(t *testing.T) {
 			},
 			expectError:  false,
 			expectedBody: bigString,
+		},
+		{
+			name: "gzip compression empty content",
+			headers: map[string]string{
+				"Accept-Encoding": "gzip",
+			},
+			contentMaker: func(_ io.Writer) error {
+				return nil
+			},
+			expectedStatus:  http.StatusNoContent,
+			expectedHeaders: map[string]string{},
+			expectError:     false,
 		},
 		{
 			name: "no gzip when not accepted",
