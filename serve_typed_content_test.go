@@ -1,7 +1,6 @@
 package httpx
 
 import (
-	"encoding/json/v2"
 	"errors"
 	"io"
 	"net/http"
@@ -25,7 +24,7 @@ func TestServeTypedContent(t *testing.T) {
 			fn:              marshalKV,
 			wantStatus:      http.StatusOK,
 			wantContentType: "application/json",
-			wantBody:        `{"key":"value"}`,
+			wantBody:        jsonString,
 			wantErr:         false,
 		},
 		{
@@ -34,7 +33,7 @@ func TestServeTypedContent(t *testing.T) {
 			fn:              marshalKV,
 			wantStatus:      http.StatusOK,
 			wantContentType: "application/json",
-			wantBody:        `{"key":"value"}`,
+			wantBody:        jsonString,
 			wantErr:         false,
 		},
 		{
@@ -43,7 +42,7 @@ func TestServeTypedContent(t *testing.T) {
 			fn:              marshalKV,
 			wantStatus:      http.StatusOK,
 			wantContentType: "application/json",
-			wantBody:        `{"key":"value"}`,
+			wantBody:        jsonString,
 			wantErr:         false,
 		},
 		{
@@ -52,7 +51,7 @@ func TestServeTypedContent(t *testing.T) {
 			fn:              marshalKV,
 			wantStatus:      http.StatusOK,
 			wantContentType: "application/json",
-			wantBody:        `{"key":"value"}`,
+			wantBody:        jsonString,
 			wantErr:         false,
 		},
 		{
@@ -61,7 +60,7 @@ func TestServeTypedContent(t *testing.T) {
 			fn:              marshalKV,
 			wantStatus:      http.StatusOK,
 			wantContentType: "application/json",
-			wantBody:        `{"key":"value"}`,
+			wantBody:        jsonString,
 			wantErr:         false,
 		},
 		{
@@ -86,7 +85,7 @@ func TestServeTypedContent(t *testing.T) {
 			fn:              marshalKV,
 			wantStatus:      http.StatusOK,
 			wantContentType: "application/json",
-			wantBody:        `{"key":"value"}`,
+			wantBody:        jsonString,
 			wantErr:         false,
 		},
 		{
@@ -105,7 +104,7 @@ func TestServeTypedContent(t *testing.T) {
 			fn:              marshalKV,
 			wantStatus:      http.StatusOK,
 			wantContentType: "application/json",
-			wantBody:        `{"key":"value"}`,
+			wantBody:        jsonString,
 			wantErr:         false,
 		},
 		{
@@ -114,7 +113,7 @@ func TestServeTypedContent(t *testing.T) {
 			fn:              marshalKV,
 			wantStatus:      http.StatusOK,
 			wantContentType: "application/json",
-			wantBody:        `{"key":"value"}`,
+			wantBody:        jsonString,
 			wantErr:         false,
 		},
 	}
@@ -156,8 +155,9 @@ func TestServeTypedContent(t *testing.T) {
 	}
 }
 
-func marshalKV(w io.Writer) error {
-	return json.MarshalWrite(w, kv)
+func marshalKV(w io.Writer) (err error) {
+	_, err = io.WriteString(w, jsonString)
+	return
 }
 
-var kv = map[string]string{"key": "value"}
+const jsonString = `{"key":"value"}`

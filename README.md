@@ -4,5 +4,5 @@
 [![License: BSD 3-Clause](https://img.shields.io/badge/License-BSD_3--Clause-yellow.svg)](https://opensource.org/licenses/BSD-3-Clause)
 
 #### Project status
-Tested on Linux Mint 22.3, requires Go version 1.27 or higher.
+Tested on Linux Mint 22.3, requires Go version 1.25 or higher.
 
