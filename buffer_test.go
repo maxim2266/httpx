@@ -134,18 +134,20 @@ func TestBufferString(t *testing.T) {
 // compare memory-only vs file-backed for different sizes
 func BenchmarkBufferMemoryVsFile(b *testing.B) {
 	sizes := []int{
-		32 * 1024,
-		64 * 1024,
-		65 * 1024,
-		128 * 1024,
-		256 * 1024,
-		512 * 1024,
-		1024 * 1024,
-		2 * 1024 * 1024,
-		4 * 1024 * 1024,
-		8 * 1024 * 1024,
-		16 * 1024 * 1024,
-		32 * 1024 * 1024,
+		0,
+		httpBufferSize / 8,
+		httpBufferSize / 4,
+		httpBufferSize / 2,
+		httpBufferSize,
+		httpBufferSize * 2,
+		httpBufferSize * 4,
+		httpBufferSize * 8,
+		httpBufferSize * 16,
+		httpBufferSize * 32,
+		httpBufferSize * 64,
+		httpBufferSize * 128,
+		httpBufferSize * 256,
+		httpBufferSize * 512,
 	}
 
 	data := bytes.Repeat([]byte("x"), sizes[len(sizes)-1])

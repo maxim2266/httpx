@@ -61,7 +61,7 @@ func ServeContent(w http.ResponseWriter, r *http.Request, fn func(io.Writer) err
 	// the actual write
 	if r.Method != http.MethodHead {
 		if err = b.writeTo(w); err != nil {
-			err = fmt.Errorf("httpx.ServeContent: %w", err)
+			err = fmt.Errorf("httpx.ServeContent writing response: %w", err)
 		}
 	}
 
@@ -117,10 +117,9 @@ func (c *compressor) apply(fn func(io.Writer) error) (err error) {
 }
 
 func (c *compressor) Write(data []byte) (n int, err error) {
-	if len(data) > 0 {
-		if n, err = c.gz.Write(data); err == nil {
-			c.count += int64(n)
-		}
+	if err = write(c.gz, data); err == nil {
+		n = len(data)
+		c.count += int64(n)
 	}
 
 	return

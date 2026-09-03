@@ -130,26 +130,26 @@ func (b *buffer) recycle() {
 	bufferPool.Put(b)
 }
 
-func write(w io.Writer, buff []byte) error {
+func write(w io.Writer, buff []byte) (err error) {
 	if len(buff) == 0 {
-		return nil
+		return
 	}
 
-	n, err := w.Write(buff)
+	var n int
 
-	if err != nil {
-		return err
+	if n, err = w.Write(buff); err != nil {
+		return
 	}
 
-	// I'm not sure about this check, but it's present in the standard io.Copy routines
+	// not sure about this length check, but it's present in the standard io.Copy routines
 	if n != len(buff) {
-		return errors.New("invalid write: wanted " +
+		err = errors.New("invalid write: submitted " +
 			strconv.Itoa(len(buff)) +
 			" bytes, but actually wrote " +
 			strconv.Itoa(n))
 	}
 
-	return nil
+	return
 }
 
 var bufferPool = sync.Pool{

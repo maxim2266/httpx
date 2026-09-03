@@ -239,20 +239,19 @@ func BenchmarkServeContentWithIncreasingSizes(b *testing.B) {
 	// Test sizes: from small to large, crossing the 64KB buffer threshold
 	sizes := []int{
 		0,
-		1 * 1024,
-		8 * 1024,
-		32 * 1024,
-		64 * 1024, // buffer limit
-		65 * 1024, // just over - file backing
-		128 * 1024,
-		256 * 1024,
-		512 * 1024,
-		1 * 1024 * 1024,
-		2 * 1024 * 1024,
-		4 * 1024 * 1024,
-		8 * 1024 * 1024,
-		16 * 1024 * 1024,
-		32 * 1024 * 1024,
+		httpBufferSize / 8,
+		httpBufferSize / 4,
+		httpBufferSize / 2,
+		httpBufferSize,
+		httpBufferSize * 2,
+		httpBufferSize * 4,
+		httpBufferSize * 8,
+		httpBufferSize * 16,
+		httpBufferSize * 32,
+		httpBufferSize * 64,
+		httpBufferSize * 128,
+		httpBufferSize * 256,
+		httpBufferSize * 512,
 	}
 
 	data := bytes.Repeat([]byte("x"), sizes[len(sizes)-1])
