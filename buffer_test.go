@@ -6,6 +6,7 @@ import (
 	"io"
 	"math/rand"
 	"os"
+	"path"
 	"strconv"
 	"testing"
 )
@@ -133,33 +134,14 @@ func TestBufferString(t *testing.T) {
 
 // compare memory-only vs file-backed for different sizes
 func BenchmarkBufferMemoryVsFile(b *testing.B) {
-	sizes := []int{
-		0,
-		httpBufferSize / 8,
-		httpBufferSize / 4,
-		httpBufferSize / 2,
-		httpBufferSize,
-		httpBufferSize * 2,
-		httpBufferSize * 4,
-		httpBufferSize * 8,
-		httpBufferSize * 16,
-		httpBufferSize * 32,
-		httpBufferSize * 64,
-		httpBufferSize * 128,
-		httpBufferSize * 256,
-		httpBufferSize * 512,
-	}
-
-	data := bytes.Repeat([]byte("x"), sizes[len(sizes)-1])
-
-	for _, size := range sizes {
+	for _, size := range testDataSizes {
 		b.Run(formatSize(size), func(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 
 			for i := 0; i < b.N; i++ {
 				buf := allocBuffer()
-				buf.Write(data[:size])
+				buf.Write(randDataSlice[:size])
 				buf.flush()
 				buf.writeTo(io.Discard)
 				buf.recycle()
@@ -191,3 +173,29 @@ func randByteSlice(n int) (s []byte) {
 
 	return
 }
+
+func baseNameOf[T interface{ Name() string }](t T) string {
+	return path.Base(t.Name())
+}
+
+// test data
+var (
+	testDataSizes = []int{
+		0,
+		httpBufferSize / 8,
+		httpBufferSize / 4,
+		httpBufferSize / 2,
+		httpBufferSize,
+		httpBufferSize * 2,
+		httpBufferSize * 4,
+		httpBufferSize * 8,
+		httpBufferSize * 16,
+		httpBufferSize * 32,
+		httpBufferSize * 64,
+		httpBufferSize * 128,
+		httpBufferSize * 256,
+		httpBufferSize * 512,
+	}
+
+	randDataSlice = randByteSlice(testDataSizes[len(testDataSizes)-1])
+)

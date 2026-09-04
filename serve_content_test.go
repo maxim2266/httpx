@@ -42,7 +42,7 @@ func TestGzipAccepted(t *testing.T) {
 }
 
 func TestServeContent(t *testing.T) {
-	bigString := string(randByteSlice(100000))
+	bigString := string(randDataSlice[:100000])
 
 	tests := []struct {
 		name            string
@@ -235,30 +235,24 @@ func readGzipBody(src *bytes.Buffer) (string, error) {
 	return string(s), nil
 }
 
-func BenchmarkServeContentWithIncreasingSizes(b *testing.B) {
-	// Test sizes: from small to large, crossing the 64KB buffer threshold
-	sizes := []int{
-		0,
-		httpBufferSize / 8,
-		httpBufferSize / 4,
-		httpBufferSize / 2,
-		httpBufferSize,
-		httpBufferSize * 2,
-		httpBufferSize * 4,
-		httpBufferSize * 8,
-		httpBufferSize * 16,
-		httpBufferSize * 32,
-		httpBufferSize * 64,
-		httpBufferSize * 128,
-		httpBufferSize * 256,
-		httpBufferSize * 512,
+func BenchmarkServeContent(b *testing.B) {
+	benchServeContent(b, false)
+}
+
+func BenchmarkServeCompressedContent(b *testing.B) {
+	benchServeContent(b, true)
+}
+
+func benchServeContent(b *testing.B, gz bool) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+
+	if gz {
+		req.Header.Add("Accept-Encoding", "gzip")
 	}
 
-	data := bytes.Repeat([]byte("x"), sizes[len(sizes)-1])
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	w := discardWriter{header: make(http.Header)}
 
-	for _, size := range sizes {
+	for _, size := range testDataSizes {
 		b.Run(formatSize(size), func(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
@@ -267,21 +261,34 @@ func BenchmarkServeContentWithIncreasingSizes(b *testing.B) {
 				w.reset()
 
 				err := ServeContent(&w, req, func(wr io.Writer) (e error) {
-					_, e = wr.Write(data[:size])
+					_, e = wr.Write(randDataSlice[len(randDataSlice)-size:])
 					return
 				})
 
 				if err != nil {
-					b.Fatalf("%d - %v", size, err)
+					b.Fatalf("(%s) %v", baseNameOf(b), err)
 				}
 
-				if w.size != size {
-					b.Fatalf("size mismatch: %d instead of %d", w.size, size)
-				}
+				switch size {
+				case 0:
+					if w.code != http.StatusNoContent {
+						b.Fatalf(
+							"(%s) unexpected HTTP code: %d instead of %d",
+							baseNameOf(b),
+							w.code,
+							http.StatusNoContent,
+						)
+					}
 
-				if (size > 0 && w.code != http.StatusOK) ||
-					(size == 0 && w.code != http.StatusNoContent) {
-					b.Fatalf("unexpected HTTP code %d", w.code)
+				default:
+					if w.code != http.StatusOK {
+						b.Fatalf(
+							"(%s) unexpected HTTP code: %d instead of %d",
+							baseNameOf(b),
+							w.code,
+							http.StatusOK,
+						)
+					}
 				}
 			}
 		})
@@ -294,8 +301,7 @@ type discardWriter struct {
 }
 
 func (w *discardWriter) reset() {
-	w.size = 0
-	w.code = 0
+	w.size, w.code = 0, 0
 	clear(w.header)
 }
 
