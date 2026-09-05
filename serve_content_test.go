@@ -99,11 +99,11 @@ func TestServeContent(t *testing.T) {
 			name:    "content maker returns error",
 			headers: map[string]string{},
 			contentMaker: func(w io.Writer) error {
-				return errors.New("generation failed")
+				return Failure(http.StatusNotImplemented, errors.New("test error"))
 			},
-			expectedStatus:  http.StatusInternalServerError,
+			expectedStatus:  http.StatusNotImplemented,
 			expectedHeaders: map[string]string{},
-			expectedBody:    "Internal Server Error\n",
+			expectedBody:    "Not Implemented\n",
 			expectError:     true,
 		},
 

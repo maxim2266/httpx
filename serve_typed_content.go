@@ -20,8 +20,9 @@ func ServeTypedContent(
 		return ServeContent(w, r, fn)
 	}
 
-	sendHttpErr(w, http.StatusNotAcceptable)
+	Error(w, http.StatusNotAcceptable)
 
-	return errors.New(`httpx.ServeTypedContent: (406) client does not accept content of type "` +
-		contentType + `"`)
+	msg := `(HTTP status 406) client does not accept content of type "` + contentType + `"`
+
+	return errors.New(msg)
 }

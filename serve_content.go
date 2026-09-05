@@ -2,7 +2,7 @@
 package httpx
 
 import (
-	"compress/gzip"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,9 +11,54 @@ import (
 	"strconv"
 	"sync"
 	"unsafe"
+
+	"github.com/klauspost/compress/gzip"
 )
 
-// ServeContent calls the given function to generate (dynamic) content, and then
+// Error replies to the request with the specified HTTP code and its associated standard message.
+func Error(w http.ResponseWriter, code int) {
+	http.Error(w, http.StatusText(code), code)
+}
+
+// error type
+type problem struct {
+	code int
+	err  error
+}
+
+// Failure creates a new error object that includes the given HTTP status code and the error.
+// Status code must be either 4xx or 5xx. The function should be used in content makers
+// when upon an error a specific HTTP status has to be sent back to the client.
+func Failure(code int, err error) error {
+	if code < 400 || len(http.StatusText(code)) == 0 {
+		err = errors.Join(
+			err,
+			errors.New("invalid HTTP error code "+strconv.Itoa(code)+" in httpx.Failure"),
+		)
+
+		code = http.StatusInternalServerError
+	}
+
+	return &problem{code, err}
+}
+
+// FailureMsg creates a new error object that includes the given HTTP status code and
+// the message. It is a thin wrapper around [Failure] function.
+func FailureMsg(code int, msg string) error {
+	return Failure(code, errors.New(msg))
+}
+
+// Error returns error message string.
+func (p *problem) Error() string {
+	return "(HTTP status " + strconv.Itoa(p.code) + ") " + p.err.Error()
+}
+
+// Unwrap returns the underlying error object.
+func (p *problem) Unwrap() error {
+	return p.err
+}
+
+// ServeContent calls the given content maker function to generate (dynamic) content, and then
 // writes the content to the given [http.ResponseWriter], while handling other aspects of the
 // response delivery (like error processing, buffering, and setting HTTP headers) internally.
 func ServeContent(w http.ResponseWriter, r *http.Request, fn func(io.Writer) error) (err error) {
@@ -23,7 +68,8 @@ func ServeContent(w http.ResponseWriter, r *http.Request, fn func(io.Writer) err
 	defer b.recycle()
 
 	// invoke content maker
-	gz := slices.ContainsFunc(r.Header.Values("Accept-Encoding"), gzipAccepted)
+	gz := (r.Method != http.MethodHead) &&
+		slices.ContainsFunc(r.Header.Values("Accept-Encoding"), gzipAccepted)
 
 	if gz {
 		err = compress(b, fn)
@@ -32,14 +78,22 @@ func ServeContent(w http.ResponseWriter, r *http.Request, fn func(io.Writer) err
 	}
 
 	if err != nil {
-		return fail(w, http.StatusInternalServerError, err)
+		// extract HTTP status, if any, and fail
+		if e, ok := err.(*problem); ok {
+			Error(w, e.code)
+			return err
+		}
+
+		Error(w, http.StatusInternalServerError)
+		return fmt.Errorf("HTTP content maker: %w", err)
 	}
 
 	// flush the buffer
 	var contentLen int64
 
 	if contentLen, err = b.flush(); err != nil {
-		return fail(w, http.StatusInternalServerError, err)
+		Error(w, http.StatusInternalServerError)
+		return fmt.Errorf("flushing HTTP buffer: %w", err)
 	}
 
 	if contentLen == 0 {
@@ -61,7 +115,7 @@ func ServeContent(w http.ResponseWriter, r *http.Request, fn func(io.Writer) err
 	// the actual write
 	if r.Method != http.MethodHead {
 		if err = b.writeTo(w); err != nil {
-			err = fmt.Errorf("httpx.ServeContent writing response: %w", err)
+			err = fmt.Errorf("writing HTTP response: %w", err)
 		}
 	}
 
@@ -127,14 +181,4 @@ func (c *compressor) Write(data []byte) (n int, err error) {
 
 func (c *compressor) WriteString(s string) (int, error) {
 	return c.Write(unsafe.Slice(unsafe.StringData(s), len(s)))
-}
-
-// error writers
-func sendHttpErr(w http.ResponseWriter, code int) {
-	http.Error(w, http.StatusText(code), code)
-}
-
-func fail(w http.ResponseWriter, code int, err error) error {
-	sendHttpErr(w, code)
-	return fmt.Errorf("httpx.ServeContent: (%d) %w", code, err)
 }
