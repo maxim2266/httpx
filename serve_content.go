@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"unsafe"
 
@@ -69,7 +71,8 @@ func ServeContent(w http.ResponseWriter, r *http.Request, fn func(io.Writer) err
 
 	// invoke content maker
 	gz := (r.Method != http.MethodHead) &&
-		slices.ContainsFunc(r.Header.Values("Accept-Encoding"), gzipAccepted)
+		slices.ContainsFunc(r.Header.Values("Accept-Encoding"), gzipAccepted) &&
+		!skipCompression(w.Header().Get("Content-Type"))
 
 	if gz {
 		err = compress(b, fn)
@@ -181,4 +184,76 @@ func (c *compressor) Write(data []byte) (n int, err error) {
 
 func (c *compressor) WriteString(s string) (int, error) {
 	return c.Write(unsafe.Slice(unsafe.StringData(s), len(s)))
+}
+
+// skip compression for some media types
+func skipCompression(contType string) (skip bool) {
+	if len(contType) == 0 {
+		return
+	}
+
+	mediaType, _, err := mime.ParseMediaType(contType)
+
+	if err != nil {
+		return
+	}
+
+	// check patterns
+	mainType, subType, _ := strings.Cut(mediaType, "/")
+
+	switch mainType {
+	case "video", "audio":
+		skip = true
+
+	case "image":
+		skip = subType != "svg+xml" && subType != "x-icon" && subType != "vnd.microsoft.icon"
+
+	case "application":
+		if _, skip = skipCompressionApps[subType]; !skip {
+			skip = strings.HasSuffix(subType, "+zip")
+		}
+
+	case "font":
+		skip = subType == "woff" || subType == "woff2"
+	}
+
+	return
+}
+
+// TODO: check this map again at some point
+var skipCompressionApps = map[string]struct{}{
+	// already-compressed fonts
+	"vnd.ms-fontobject": {},
+
+	// archives
+	"zstd":                        {},
+	"x-zstd":                      {},
+	"zip":                         {},
+	"gzip":                        {},
+	"x-gzip":                      {},
+	"x-7z-compressed":             {},
+	"x-bzip":                      {},
+	"x-bzip2":                     {},
+	"x-compress":                  {},
+	"x-deb":                       {},
+	"x-lzip":                      {},
+	"x-lzma":                      {},
+	"x-lzop":                      {},
+	"x-rar-compressed":            {},
+	"vnd.rar":                     {},
+	"x-rpm":                       {},
+	"x-xz":                        {},
+	"java-archive":                {},
+	"x-java-archive":              {},
+	"vnd.android.package-archive": {},
+
+	// documents (ZIP-based formats)
+	"vnd.openxmlformats-officedocument.wordprocessingml.document":   {},
+	"vnd.openxmlformats-officedocument.spreadsheetml.sheet":         {},
+	"vnd.openxmlformats-officedocument.presentationml.presentation": {},
+	"vnd.oasis.opendocument.text":                                   {},
+	"vnd.oasis.opendocument.spreadsheet":                            {},
+
+	// other
+	"pdf": {}, // usually compressed
 }

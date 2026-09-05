@@ -235,6 +235,24 @@ func readGzipBody(src *bytes.Buffer) (string, error) {
 	return string(s), nil
 }
 
+func TestSkipCompression(t *testing.T) {
+	tests := map[string]bool{
+		"":                 false,
+		"@@@$$$":           false,
+		"application/json": false,
+		"application/gzip": true,
+		"IMAGE/JPEG":       true,
+		"video/mp4":        true,
+		"font/woff":        true,
+	}
+
+	for k, v := range tests {
+		if r := skipCompression(k); r != v {
+			t.Fatalf("%s: %v instead of %v", k, r, v)
+		}
+	}
+}
+
 func BenchmarkServeContent(b *testing.B) {
 	benchServeContent(b, false)
 }
