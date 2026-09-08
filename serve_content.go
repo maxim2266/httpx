@@ -69,10 +69,14 @@ func ServeContent(w http.ResponseWriter, r *http.Request, fn func(io.Writer) err
 
 	defer b.recycle()
 
+	// HTTP header
+	h := w.Header()
+
 	// invoke content maker
-	gz := (r.Method != http.MethodHead) &&
+	gz := r.Method != http.MethodHead &&
+		len(h.Get("Content-Encoding")) == 0 &&
 		slices.ContainsFunc(r.Header.Values("Accept-Encoding"), gzipAccepted) &&
-		!skipCompression(w.Header().Get("Content-Type"))
+		!skipCompression(h.Get("Content-Type"))
 
 	if gz {
 		err = compress(b, fn)
@@ -99,18 +103,24 @@ func ServeContent(w http.ResponseWriter, r *http.Request, fn func(io.Writer) err
 		return fmt.Errorf("flushing HTTP buffer: %w", err)
 	}
 
+	// setup and send HTTP headers
 	if contentLen == 0 {
+		h.Del("Content-Encoding")
+		h.Del("Transfer-Encoding")
+
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 
-	// HTTP header
-	h := w.Header()
-
 	h.Set("Content-Length", strconv.FormatInt(contentLen, 10))
+	setVaryHeader(h)
 
 	if gz {
 		h.Set("Content-Encoding", "gzip")
+
+		if etag := h.Get("ETag"); len(etag) >= 2 {
+			h.Set("ETag", etag[:len(etag)-1]+`-gzip"`) // overwrite last quote
+		}
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -123,6 +133,16 @@ func ServeContent(w http.ResponseWriter, r *http.Request, fn func(io.Writer) err
 	}
 
 	return
+}
+
+func setVaryHeader(h http.Header) {
+	for _, s := range h.Values("Vary") {
+		if s = strings.TrimSpace(s); s == "*" || strings.EqualFold(s, "Accept-Encoding") {
+			return
+		}
+	}
+
+	h.Add("Vary", "Accept-Encoding")
 }
 
 func compress(b *buffer, fn func(io.Writer) error) (err error) {

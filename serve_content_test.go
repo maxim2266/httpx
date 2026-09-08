@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -37,6 +38,32 @@ func TestGzipAccepted(t *testing.T) {
 	for _, tt := range tests {
 		if got := gzipAccepted(tt.header); got != tt.want {
 			t.Fatalf("gzipAccepted(%q) = %v; want %v", tt.header, got, tt.want)
+		}
+	}
+}
+
+func TestSetVaryHeader(t *testing.T) {
+	tests := []struct {
+		val, exp string
+	}{
+		{"", "Accept-Encoding"},
+		{"Accept-Encoding", "Accept-Encoding"},
+		{"accept-encoding", "accept-encoding"},
+		{"*", "*"},
+		{"Origin", "Origin,Accept-Encoding"},
+	}
+
+	h := make(http.Header)
+
+	for i, tc := range tests {
+		if len(tc.val) > 0 {
+			h.Set("Vary", tc.val)
+		}
+
+		setVaryHeader(h)
+
+		if r := strings.Join(h.Values("Vary"), ","); r != tc.exp {
+			t.Fatalf(`(%d) header mismatch: "%s" instead of "%s"`, i, r, tc.exp)
 		}
 	}
 }
@@ -120,6 +147,8 @@ func TestServeContent(t *testing.T) {
 			expectedStatus: http.StatusOK,
 			expectedHeaders: map[string]string{
 				"Content-Encoding": "gzip",
+				"Vary":             "Accept-Encoding",
+				"ETag":             `"xxx-gzip"`,
 			},
 			expectError:  false,
 			expectedBody: "hello world",
@@ -136,6 +165,8 @@ func TestServeContent(t *testing.T) {
 			expectedStatus: http.StatusOK,
 			expectedHeaders: map[string]string{
 				"Content-Encoding": "gzip",
+				"Vary":             "Accept-Encoding",
+				"ETag":             `"xxx-gzip"`,
 			},
 			expectError:  false,
 			expectedBody: bigString,
@@ -148,9 +179,12 @@ func TestServeContent(t *testing.T) {
 			contentMaker: func(_ io.Writer) error {
 				return nil
 			},
-			expectedStatus:  http.StatusNoContent,
-			expectedHeaders: map[string]string{},
-			expectError:     false,
+			expectedStatus: http.StatusNoContent,
+			expectedHeaders: map[string]string{
+				"Content-Encoding": "",
+				"ETag":             `"xxx"`,
+			},
+			expectError: false,
 		},
 		{
 			name: "no gzip when not accepted",
@@ -165,6 +199,7 @@ func TestServeContent(t *testing.T) {
 			expectedHeaders: map[string]string{
 				"Content-Encoding": "",
 				"Content-Length":   "11",
+				"ETag":             `"xxx"`,
 			},
 			expectedBody: "hello world",
 			expectError:  false,
@@ -180,6 +215,9 @@ func TestServeContent(t *testing.T) {
 			}
 
 			w := httptest.NewRecorder()
+
+			w.Header().Set("ETag", `"xxx"`)
+
 			err := ServeContent(w, req, tt.contentMaker)
 
 			if (err != nil) != tt.expectError {
