@@ -12,7 +12,7 @@ import (
 	"testing"
 )
 
-func TestGzipAccepted(t *testing.T) {
+func TestHasGzip(t *testing.T) {
 	tests := []struct {
 		header string
 		want   bool
@@ -36,7 +36,7 @@ func TestGzipAccepted(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		if got := gzipAccepted(tt.header); got != tt.want {
+		if got := hasGzip(tt.header); got != tt.want {
 			t.Fatalf("gzipAccepted(%q) = %v; want %v", tt.header, got, tt.want)
 		}
 	}

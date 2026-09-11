@@ -7,18 +7,13 @@ import (
 	"net/http"
 )
 
-// Error constructs an error object with additional content to respond with,
-// and of the given Content-Type. The actual content sending is handled in
-// [ServeContent] function.
-func Error(err error, contType, cont string) error {
-	if err == nil {
-		return errors.New("nil error in httpx.Error")
-	}
-
+// Error combines the given error with additional content (and its type) that may be sent
+// to the client by [ServeContent]. Useful only within a [ContentMaker] function.
+func Error(err error, contentType, content string) error {
 	return &problem{
 		err:      err,
-		cont:     cont,
-		contType: cmp.Or(contType, "text/plain; charset=utf-8"),
+		cont:     content,
+		contType: cmp.Or(contentType, "text/plain; charset=utf-8"),
 	}
 }
 
@@ -30,7 +25,7 @@ type problem struct {
 
 // Error returns error message string
 func (p *problem) Error() string {
-	return p.err.Error()
+	return p.Unwrap().Error()
 }
 
 // Unwrap returns underlying error object

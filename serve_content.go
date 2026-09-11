@@ -20,8 +20,10 @@ import (
 // response body. It writes the body to the provided [io.Writer] and returns an
 // HTTP status code and an error.
 //
-// The returned status is only used when err is nil, and must be in the range
-// 200–599. If the status is 204, 205, or 304, no body is sent.
+// The returned status is only used when:
+//   - error is nil, and the status is in the range 200–599; if the status is 204,
+//     205, or 304, no body is sent.
+//   - error is created by [Error] function, and the status is 4xx or 5xx.
 //
 // The writer is a buffering sink; no bytes reach the client until the callback
 // returns successfully. The callback must not retain it.
@@ -57,8 +59,8 @@ func ServeContent(
 	h := w.Header()
 
 	// invoke content maker
-	gz := contentEncodingNotSet(h) &&
-		slices.ContainsFunc(r.Header.Values("Accept-Encoding"), gzipAccepted) &&
+	gz := contentEncodingNotSet(h.Get("Content-Encoding")) &&
+		gzipAcceted(r.Header.Values("Accept-Encoding")) &&
 		!skipCompression(h.Get("Content-Type"))
 
 	if gz {
@@ -132,9 +134,8 @@ func report(w http.ResponseWriter, prefix string, err error) (int, error) {
 	return http.StatusInternalServerError, fmt.Errorf("%s: %w", prefix, err)
 }
 
-func contentEncodingNotSet(h http.Header) bool {
-	s := h.Get("Content-Encoding")
-	return len(s) == 0 || strings.ToLower(s) == "identity"
+func contentEncodingNotSet(s string) bool {
+	return len(s) == 0 || strings.EqualFold(s, "identity")
 }
 
 func setVaryHeader(h http.Header) {
@@ -147,9 +148,14 @@ func setVaryHeader(h http.Header) {
 	h.Add("Vary", "Accept-Encoding")
 }
 
+// gzip acceptance tester
+func gzipAcceted(h []string) bool {
+	return slices.ContainsFunc(h, hasGzip)
+}
+
 const gzipRE = `(?i)(^|,)\s*(gzip(\s*;\s*q\s*=\s*(0?\.([1-9]\d{0,2})|1(\.0{0,3})?))?|\*)\s*(,|$)`
 
-var gzipAccepted = regexp.MustCompile(gzipRE).MatchString
+var hasGzip = regexp.MustCompile(gzipRE).MatchString
 
 // apply compression
 func compress(b *buffer, fn ContentMaker) (status int, err error) {
