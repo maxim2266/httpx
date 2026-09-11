@@ -2,6 +2,7 @@
 package httpx
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"io"
@@ -20,11 +21,6 @@ import (
 // response body. It writes the body to the provided [io.Writer] and returns an
 // HTTP status code and an error.
 //
-// The returned status is only used when:
-//   - error is nil, and the status is in the range 200–599; if the status is 204,
-//     205, or 304, no body is sent.
-//   - error is created by [Error] function, and the status is 4xx or 5xx.
-//
 // The writer is a buffering sink; no bytes reach the client until the callback
 // returns successfully. The callback must not retain it.
 type ContentMaker = func(io.Writer) (int, error)
@@ -39,8 +35,10 @@ type ContentMaker = func(io.Writer) (int, error)
 //
 // The callback's output is fully buffered before any status or header is
 // written, so an error or invalid status do not send partial body.
-// If the callback returns an error created by [Error] function, its content and status
-// are delivered to the client instead; otherwise a generic 500 is sent.
+//
+// An error returned from the content maker function discards output buffer.
+// If the error is created by [Error] function, then the error's associated
+// content is delivered to the client instead of a generic text for the status code.
 //
 // Return values: status is always the actual HTTP status sent to the client, while
 // err is for logging only and reflects failures that may have happened during response
@@ -70,31 +68,48 @@ func ServeContent(
 	}
 
 	// fail on error
-	switch e := err.(type) {
-	case nil:
-		// ok, proceed
-	case *problem:
-		return e.report(w, status, "content maker")
-	default:
-		return report(w, "content maker", err)
+	if err != nil {
+		// status must be 4xx or 5xx
+		if status < 400 || status > 599 {
+			status = http.StatusInternalServerError
+		}
+
+		// report error
+		if e, ok := err.(*problem); ok {
+			// set headers like http.Error does
+			h.Del("Content-Length")
+			h.Set("X-Content-Type-Options", "nosniff")
+			h.Set("Content-Type", e.contType)
+
+			// write response
+			w.WriteHeader(status)
+			writeString(w, e.cont)
+
+			err = e.Unwrap()
+
+		} else {
+			http.Error(w, cmp.Or(http.StatusText(status), "Error"), status)
+		}
+
+		err = fmt.Errorf("content maker: %w", err)
+		return
 	}
 
 	// check status
-	switch status {
-	case http.StatusNoContent, http.StatusNotModified, http.StatusResetContent:
-		// these responses must not have body
+	if status < 200 || status > 599 { // disallow 1xx and non-standard codes
+		return report(
+			w,
+			"content maker",
+			errors.New("invalid HTTP status "+strconv.Itoa(status)),
+		)
+	}
+
+	if status == http.StatusNoContent ||
+		status == http.StatusNotModified ||
+		status == http.StatusResetContent {
+		// these responses must not have a body
 		w.WriteHeader(status)
 		return
-
-	default:
-		// disallow 1xx codes
-		if status < 200 || status > 599 {
-			return report(
-				w,
-				"content maker",
-				errors.New("invalid status "+strconv.Itoa(status)),
-			)
-		}
 	}
 
 	// flush the buffer
@@ -134,10 +149,12 @@ func report(w http.ResponseWriter, prefix string, err error) (int, error) {
 	return http.StatusInternalServerError, fmt.Errorf("%s: %w", prefix, err)
 }
 
+// content encoding check
 func contentEncodingNotSet(s string) bool {
 	return len(s) == 0 || strings.EqualFold(s, "identity")
 }
 
+// set Vary header if not there yet
 func setVaryHeader(h http.Header) {
 	for _, s := range h.Values("Vary") {
 		if s = strings.TrimSpace(s); s == "*" || strings.EqualFold(s, "Accept-Encoding") {
