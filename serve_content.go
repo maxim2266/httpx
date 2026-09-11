@@ -12,58 +12,42 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"unsafe"
 
 	"github.com/klauspost/compress/gzip"
 )
 
-// Error replies to the request with the specified HTTP code and its associated standard message.
-func Error(w http.ResponseWriter, code int) {
-	http.Error(w, http.StatusText(code), code)
-}
+// ContentMaker is the callback type invoked by [ServeContent] to generate the
+// response body. It writes the body to the provided [io.Writer] and returns an
+// HTTP status code and an error.
+//
+// The returned status is only used when err is nil, and must be in the range
+// 200–599. If the status is 204, 205, or 304, no body is sent.
+//
+// The writer is a buffering sink; no bytes reach the client until the callback
+// returns successfully. The callback must not retain it.
+type ContentMaker = func(io.Writer) (int, error)
 
-// error type
-type problem struct {
-	code int
-	err  error
-}
-
-// Failure creates a new error object that includes the given HTTP status code and the error.
-// Status code must be either 4xx or 5xx. The function should be used in content makers
-// when upon an error a specific HTTP status has to be sent back to the client.
-func Failure(code int, err error) error {
-	if code < 400 || len(http.StatusText(code)) == 0 {
-		err = errors.Join(
-			err,
-			errors.New("invalid HTTP error code "+strconv.Itoa(code)+" in httpx.Failure"),
-		)
-
-		code = http.StatusInternalServerError
-	}
-
-	return &problem{code, err}
-}
-
-// FailureMsg creates a new error object that includes the given HTTP status code and
-// the message. It is a thin wrapper around [Failure] function.
-func FailureMsg(code int, msg string) error {
-	return Failure(code, errors.New(msg))
-}
-
-// Error returns error message string.
-func (p *problem) Error() string {
-	return "(HTTP status " + strconv.Itoa(p.code) + ") " + p.err.Error()
-}
-
-// Unwrap returns the underlying error object.
-func (p *problem) Unwrap() error {
-	return p.err
-}
-
-// ServeContent calls the given content maker function to generate (dynamic) content, and then
-// writes the content to the given [http.ResponseWriter], while handling other aspects of the
-// response delivery (like error processing, buffering, and setting HTTP headers) internally.
-func ServeContent(w http.ResponseWriter, r *http.Request, fn func(io.Writer) error) (err error) {
+// ServeContent invokes fn to generate a response body and delivers it to the
+// client via w, handling buffering, optional gzip compression, and error
+// reporting.
+//
+// Headers that affect delivery (Content-Type, ETag) must be set on w.Header()
+// before calling. If Content-Encoding is already set, ServeContent assumes the
+// caller is handling encoding and does not compress.
+//
+// The callback's output is fully buffered before any status or header is
+// written, so an error or invalid status do not send partial body.
+// If the callback returns an error created by [Error] function, its content and status
+// are delivered to the client instead; otherwise a generic 500 is sent.
+//
+// Return values: status is always the actual HTTP status sent to the client, while
+// err is for logging only and reflects failures that may have happened during response
+// creation and delivery. Content of err is never sent to the client.
+func ServeContent(
+	w http.ResponseWriter,
+	r *http.Request,
+	fn ContentMaker,
+) (status int, err error) {
 	// buffer
 	b := allocBuffer()
 
@@ -73,45 +57,52 @@ func ServeContent(w http.ResponseWriter, r *http.Request, fn func(io.Writer) err
 	h := w.Header()
 
 	// invoke content maker
-	gz := r.Method != http.MethodHead &&
-		len(h.Get("Content-Encoding")) == 0 &&
+	gz := contentEncodingNotSet(h) &&
 		slices.ContainsFunc(r.Header.Values("Accept-Encoding"), gzipAccepted) &&
 		!skipCompression(h.Get("Content-Type"))
 
 	if gz {
-		err = compress(b, fn)
+		status, err = compress(b, fn)
 	} else {
-		err = fn(b)
+		status, err = fn(b)
 	}
 
-	if err != nil {
-		// extract HTTP status, if any, and fail
-		if e, ok := err.(*problem); ok {
-			Error(w, e.code)
-			return err
-		}
+	// fail on error
+	switch e := err.(type) {
+	case nil:
+		// ok, proceed
+	case *problem:
+		return e.report(w, status, "content maker")
+	default:
+		return report(w, "content maker", err)
+	}
 
-		Error(w, http.StatusInternalServerError)
-		return fmt.Errorf("HTTP content maker: %w", err)
+	// check status
+	switch status {
+	case http.StatusNoContent, http.StatusNotModified, http.StatusResetContent:
+		// these responses must not have body
+		w.WriteHeader(status)
+		return
+
+	default:
+		// disallow 1xx codes
+		if status < 200 || status > 599 {
+			return report(
+				w,
+				"content maker",
+				errors.New("invalid status "+strconv.Itoa(status)),
+			)
+		}
 	}
 
 	// flush the buffer
 	var contentLen int64
 
 	if contentLen, err = b.flush(); err != nil {
-		Error(w, http.StatusInternalServerError)
-		return fmt.Errorf("flushing HTTP buffer: %w", err)
+		return report(w, "buffer flush", err)
 	}
 
 	// setup and send HTTP headers
-	if contentLen == 0 {
-		h.Del("Content-Encoding")
-		h.Del("Transfer-Encoding")
-
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-
 	h.Set("Content-Length", strconv.FormatInt(contentLen, 10))
 	setVaryHeader(h)
 
@@ -123,7 +114,7 @@ func ServeContent(w http.ResponseWriter, r *http.Request, fn func(io.Writer) err
 		}
 	}
 
-	w.WriteHeader(http.StatusOK)
+	w.WriteHeader(status)
 
 	// the actual write
 	if r.Method != http.MethodHead {
@@ -133,6 +124,17 @@ func ServeContent(w http.ResponseWriter, r *http.Request, fn func(io.Writer) err
 	}
 
 	return
+}
+
+// respond with 500 and format error
+func report(w http.ResponseWriter, prefix string, err error) (int, error) {
+	http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	return http.StatusInternalServerError, fmt.Errorf("%s: %w", prefix, err)
+}
+
+func contentEncodingNotSet(h http.Header) bool {
+	s := h.Get("Content-Encoding")
+	return len(s) == 0 || strings.ToLower(s) == "identity"
 }
 
 func setVaryHeader(h http.Header) {
@@ -145,65 +147,50 @@ func setVaryHeader(h http.Header) {
 	h.Add("Vary", "Accept-Encoding")
 }
 
-func compress(b *buffer, fn func(io.Writer) error) (err error) {
-	c := compressorPool.Get().(*compressor)
+const gzipRE = `(?i)(^|,)\s*(gzip(\s*;\s*q\s*=\s*(0?\.([1-9]\d{0,2})|1(\.0{0,3})?))?|\*)\s*(,|$)`
 
-	defer c.recycle()
+var gzipAccepted = regexp.MustCompile(gzipRE).MatchString
 
-	c.gz.Reset(b)
+// apply compression
+func compress(b *buffer, fn ContentMaker) (status int, err error) {
+	gz := compressorPool.Get().(*gzip.Writer)
 
-	if err = c.apply(fn); err == nil && c.count == 0 {
-		// nothing has been written to the compressor - reset target buffer
-		b.wi = 0
+	defer func() {
+		gz.Reset(io.Discard) // cut off buffer connection to help gc
+		compressorPool.Put(gz)
+	}()
+
+	gz.Reset(b)
+
+	if status, err = fn(compressor{gz}); err == nil {
+		err = gz.Close()
 	}
 
 	return
 }
 
-const gzipRE = `(?i)(^|,)\s*(gzip(\s*;\s*q\s*=\s*(0?\.([1-9]\d{0,2})|1(\.0{0,3})?))?|\*)\s*(,|$)`
-
-var gzipAccepted = regexp.MustCompile(gzipRE).MatchString
-
 // pool of compressors
 var compressorPool = sync.Pool{
 	New: func() any {
-		return &compressor{
-			gz: gzip.NewWriter(io.Discard),
-		}
+		return gzip.NewWriter(io.Discard)
 	},
 }
 
 // gzip.Writer wrapper
 type compressor struct {
-	gz    *gzip.Writer
-	count int64
+	gz *gzip.Writer
 }
 
-func (c *compressor) recycle() {
-	c.gz.Reset(io.Discard) // cut off buffer connection to help gc
-	c.count = 0
-	compressorPool.Put(c)
-}
-
-func (c *compressor) apply(fn func(io.Writer) error) (err error) {
-	if err = fn(c); err == nil {
-		err = c.gz.Close()
-	}
-
-	return
-}
-
-func (c *compressor) Write(data []byte) (n int, err error) {
+func (c compressor) Write(data []byte) (n int, err error) {
 	if err = write(c.gz, data); err == nil {
 		n = len(data)
-		c.count += int64(n)
 	}
 
 	return
 }
 
-func (c *compressor) WriteString(s string) (int, error) {
-	return c.Write(unsafe.Slice(unsafe.StringData(s), len(s)))
+func (c compressor) WriteString(s string) (int, error) {
+	return writeString(c, s)
 }
 
 // skip compression for some media types

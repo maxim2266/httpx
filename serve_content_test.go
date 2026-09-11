@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"compress/gzip"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -68,211 +68,6 @@ func TestSetVaryHeader(t *testing.T) {
 	}
 }
 
-func TestServeContent(t *testing.T) {
-	bigString := string(randDataSlice[:100000])
-
-	tests := []struct {
-		name            string
-		headers         map[string]string
-		contentMaker    func(io.Writer) error
-		expectedStatus  int
-		expectedHeaders map[string]string
-		expectedBody    string
-		expectError     bool
-	}{
-		// simple response w/o error
-		{
-			name:    "successful response",
-			headers: map[string]string{},
-			contentMaker: func(w io.Writer) (err error) {
-				_, err = io.WriteString(w, "hello world")
-				return
-			},
-			expectedStatus: http.StatusOK,
-			expectedHeaders: map[string]string{
-				"Content-Length": "11",
-			},
-			expectedBody: "hello world",
-			expectError:  false,
-		},
-		{
-			name:    "successful response with big string",
-			headers: map[string]string{},
-			contentMaker: func(w io.Writer) (err error) {
-				_, err = io.WriteString(w, bigString)
-				return
-			},
-			expectedStatus: http.StatusOK,
-			expectedHeaders: map[string]string{
-				"Content-Length": "100000",
-			},
-			expectedBody: bigString,
-			expectError:  false,
-		},
-		{
-			name:    "empty content",
-			headers: map[string]string{},
-			contentMaker: func(_ io.Writer) error {
-				return nil
-			},
-			expectedStatus:  http.StatusNoContent,
-			expectedHeaders: map[string]string{},
-			expectedBody:    "",
-			expectError:     false,
-		},
-
-		// content maker error
-		{
-			name:    "content maker returns error",
-			headers: map[string]string{},
-			contentMaker: func(w io.Writer) error {
-				return Failure(http.StatusNotImplemented, errors.New("test error"))
-			},
-			expectedStatus:  http.StatusNotImplemented,
-			expectedHeaders: map[string]string{},
-			expectedBody:    "Not Implemented\n",
-			expectError:     true,
-		},
-
-		// gzip compression
-		{
-			name: "gzip compression when accepted",
-			headers: map[string]string{
-				"Accept-Encoding": "gzip",
-			},
-			contentMaker: func(w io.Writer) (err error) {
-				_, err = io.WriteString(w, "hello world")
-				return
-			},
-			expectedStatus: http.StatusOK,
-			expectedHeaders: map[string]string{
-				"Content-Encoding": "gzip",
-				"Vary":             "Accept-Encoding",
-				"ETag":             `"xxx-gzip"`,
-			},
-			expectError:  false,
-			expectedBody: "hello world",
-		},
-		{
-			name: "gzip compression with big string",
-			headers: map[string]string{
-				"Accept-Encoding": "gzip",
-			},
-			contentMaker: func(w io.Writer) (err error) {
-				_, err = io.WriteString(w, bigString)
-				return
-			},
-			expectedStatus: http.StatusOK,
-			expectedHeaders: map[string]string{
-				"Content-Encoding": "gzip",
-				"Vary":             "Accept-Encoding",
-				"ETag":             `"xxx-gzip"`,
-			},
-			expectError:  false,
-			expectedBody: bigString,
-		},
-		{
-			name: "gzip compression empty content",
-			headers: map[string]string{
-				"Accept-Encoding": "gzip",
-			},
-			contentMaker: func(_ io.Writer) error {
-				return nil
-			},
-			expectedStatus: http.StatusNoContent,
-			expectedHeaders: map[string]string{
-				"Content-Encoding": "",
-				"ETag":             `"xxx"`,
-			},
-			expectError: false,
-		},
-		{
-			name: "no gzip when not accepted",
-			headers: map[string]string{
-				"Accept-Encoding": "deflate",
-			},
-			contentMaker: func(w io.Writer) (err error) {
-				_, err = io.WriteString(w, "hello world")
-				return
-			},
-			expectedStatus: http.StatusOK,
-			expectedHeaders: map[string]string{
-				"Content-Encoding": "",
-				"Content-Length":   "11",
-				"ETag":             `"xxx"`,
-			},
-			expectedBody: "hello world",
-			expectError:  false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "/", nil)
-
-			for k, v := range tt.headers {
-				req.Header.Set(k, v)
-			}
-
-			w := httptest.NewRecorder()
-
-			w.Header().Set("ETag", `"xxx"`)
-
-			err := ServeContent(w, req, tt.contentMaker)
-
-			if (err != nil) != tt.expectError {
-				t.Fatalf("ServeContent() error = %v, expectError %v", err, tt.expectError)
-			}
-
-			if w.Code != tt.expectedStatus {
-				t.Fatalf("status code = %v, want %v", w.Code, tt.expectedStatus)
-			}
-
-			for k, v := range tt.expectedHeaders {
-				if got := w.Header().Get(k); got != v {
-					t.Fatalf("header %s = %v, want %v", k, got, v)
-				}
-			}
-
-			// response body
-			var body string
-
-			if w.Header().Get("Content-Encoding") == "gzip" {
-				if body, err = readGzipBody(w.Body); err != nil {
-					t.Fatal(err)
-				}
-			} else {
-				body = w.Body.String()
-			}
-
-			// check the body
-			if len(tt.expectedBody) > 0 && body != tt.expectedBody {
-				t.Fatalf("body = %q, want %q", body, tt.expectedBody)
-			}
-		})
-	}
-}
-
-func readGzipBody(src *bytes.Buffer) (string, error) {
-	reader, err := gzip.NewReader(src)
-
-	if err != nil {
-		return "", fmt.Errorf("creating gzip reader: %w", err)
-	}
-
-	s, err := io.ReadAll(reader)
-
-	if err != nil {
-		return "", fmt.Errorf("reading gzip'ed content: %w", err)
-	}
-
-	if err = reader.Close(); err != nil {
-		return "", fmt.Errorf("closing gzip: %w", err)
-	}
-
-	return string(s), nil
-}
-
 func TestSkipCompression(t *testing.T) {
 	tests := map[string]bool{
 		"":                 false,
@@ -288,6 +83,378 @@ func TestSkipCompression(t *testing.T) {
 		if r := skipCompression(k); r != v {
 			t.Fatalf("%s: %v instead of %v", k, r, v)
 		}
+	}
+}
+
+// helpers: ContentMakers that write s and return status.
+func body(s string, status int) ContentMaker {
+	return func(w io.Writer) (int, error) {
+		if _, err := io.WriteString(w, s); err != nil {
+			return http.StatusInternalServerError, err
+		}
+
+		return status, nil
+	}
+}
+
+func bodySlice(s []byte, status int) ContentMaker {
+	return func(w io.Writer) (int, error) {
+		if _, err := w.Write(s); err != nil {
+			return http.StatusInternalServerError, err
+		}
+
+		return status, nil
+	}
+}
+
+// helper: decompress a gzip-encoded response body.
+func gunzip(t *testing.T, b []byte) []byte {
+	t.Helper()
+
+	r, err := gzip.NewReader(bytes.NewReader(b))
+
+	if err != nil {
+		t.Fatalf("gzip.NewReader: %v", err)
+	}
+
+	defer r.Close()
+
+	out, err := io.ReadAll(r)
+
+	if err != nil {
+		t.Fatalf("gzip read: %v", err)
+	}
+
+	return out
+}
+
+func TestServeContent_Body(t *testing.T) {
+	const payload = "hello"
+
+	cases := []struct {
+		name         string
+		acceptEnc    string
+		preHeaders   map[string]string
+		contentType  string
+		wantEncoding string // "" means no Content-Encoding expected
+		wantETag     string
+		content      string
+	}{
+		{
+			name:     "plain",
+			content:  payload,
+			wantETag: "",
+		},
+		{
+			name:         "gzip",
+			acceptEnc:    "gzip",
+			content:      payload,
+			wantEncoding: "gzip",
+		},
+		{
+			name:         "gzip skipped when Content-Encoding already set",
+			acceptEnc:    "gzip",
+			preHeaders:   map[string]string{"Content-Encoding": "br"},
+			content:      payload,
+			wantEncoding: "br",
+		},
+		{
+			name:         "gzip applied despite preset identity",
+			acceptEnc:    "gzip",
+			preHeaders:   map[string]string{"Content-Encoding": "identity"},
+			content:      payload,
+			wantEncoding: "gzip",
+		},
+		{
+			name:         "gzip with strong ETag",
+			acceptEnc:    "gzip",
+			preHeaders:   map[string]string{"ETag": `"abc123"`},
+			content:      payload,
+			wantEncoding: "gzip",
+			wantETag:     `"abc123-gzip"`,
+		},
+		{
+			name:         "gzip with weak ETag",
+			acceptEnc:    "gzip",
+			preHeaders:   map[string]string{"ETag": `W/"abc123"`},
+			content:      payload,
+			wantEncoding: "gzip",
+			wantETag:     `W/"abc123-gzip"`,
+		},
+		{
+			name:       "uncompressed keeps ETag unchanged",
+			preHeaders: map[string]string{"ETag": `"abc123"`},
+			content:    payload,
+			wantETag:   `"abc123"`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+
+			if tc.acceptEnc != "" {
+				req.Header.Set("Accept-Encoding", tc.acceptEnc)
+			}
+
+			for k, v := range tc.preHeaders {
+				rec.Header().Set(k, v)
+			}
+
+			status, err := ServeContent(rec, req, body(tc.content, http.StatusOK))
+
+			if err != nil {
+				t.Fatalf("ServeContent: %v", err)
+			}
+
+			if status != http.StatusOK {
+				t.Fatalf("status: got %d, want 200", status)
+			}
+
+			res := rec.Result()
+
+			if got := res.Header.Get("Content-Encoding"); got != tc.wantEncoding {
+				t.Fatalf("Content-Encoding: got %q, want %q", got, tc.wantEncoding)
+			}
+
+			if got := res.Header.Get("ETag"); got != tc.wantETag {
+				t.Fatalf("ETag: got %q, want %q", got, tc.wantETag)
+			}
+
+			if got := res.Header.Get("Vary"); !strings.Contains(got, "Accept-Encoding") {
+				t.Fatalf("Vary: got %q, want it to contain Accept-Encoding", got)
+			}
+
+			got := rec.Body.Bytes()
+
+			if tc.wantEncoding == "gzip" {
+				got = gunzip(t, got)
+			}
+
+			if string(got) != tc.content {
+				t.Fatalf("body: got %q, want %q", got, tc.content)
+			}
+
+			// Content-Length must match the bytes actually sent.
+			wantCL := strconv.Itoa(len(rec.Body.Bytes()))
+
+			if got := res.Header.Get("Content-Length"); got != wantCL {
+				t.Fatalf("Content-Length: got %q, want %q", got, wantCL)
+			}
+		})
+	}
+}
+
+func TestServeContent_NoBodyStatuses(t *testing.T) {
+	for _, status := range []int{
+		http.StatusNoContent,
+		http.StatusNotModified,
+		http.StatusResetContent,
+	} {
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.Header.Set("Accept-Encoding", "gzip")
+
+			gotStatus, err := ServeContent(rec, req, body("ignored", status))
+
+			if err != nil {
+				t.Fatalf("ServeContent: %v", err)
+			}
+
+			if gotStatus != status {
+				t.Fatalf("status: got %d, want %d", gotStatus, status)
+			}
+
+			if rec.Body.Len() != 0 {
+				t.Fatalf("body: got %q, want empty", rec.Body.String())
+			}
+
+			if h := rec.Result().Header; h.Get("Content-Encoding") != "" {
+				t.Fatalf("Content-Encoding: got %q, want empty", h.Get("Content-Encoding"))
+			}
+		})
+	}
+}
+
+func TestServeContent_InvalidStatus(t *testing.T) {
+	for _, status := range []int{0, 100, 150, 199, 600, 999} {
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+
+			gotStatus, err := ServeContent(rec, req, body("x", status))
+
+			if err == nil {
+				t.Fatalf("expected error for status %d", status)
+			}
+
+			if gotStatus != http.StatusInternalServerError {
+				t.Fatalf("returned status: got %d, want 500", gotStatus)
+			}
+
+			if rec.Code != http.StatusInternalServerError {
+				t.Fatalf("recorder code: got %d, want 500", rec.Code)
+			}
+		})
+	}
+}
+
+func TestServeContent_MakerError(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+
+	makerErr := errors.New("boom")
+
+	_, err := ServeContent(rec, req, func(w io.Writer) (int, error) {
+		io.WriteString(w, "partial")
+		return http.StatusOK, makerErr
+	})
+
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+
+	if !errors.Is(err, makerErr) {
+		t.Fatalf("error chain: got %v, want it to wrap %v", err, makerErr)
+	}
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("code: got %d, want 500", rec.Code)
+	}
+
+	if got := rec.Body.String(); got != "Internal Server Error\n" {
+		t.Fatalf("body: %q", got)
+	}
+}
+
+func TestServeContent_MakerCustomError(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+
+	makerErr := errors.New("boom")
+
+	status, err := ServeContent(rec, req, func(w io.Writer) (int, error) {
+		io.WriteString(w, "partial")
+		return http.StatusOK, Error(makerErr, "text/plain", "zzz")
+	})
+
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+
+	if !errors.Is(err, makerErr) {
+		t.Fatalf("error chain: got %v, want it to wrap %v", err, makerErr)
+	}
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("code: got %d, want 500", rec.Code)
+	}
+
+	if status != http.StatusInternalServerError {
+		t.Fatalf("status: got %d, want 500", status)
+	}
+
+	if ct := rec.Header().Get("Content-Type"); ct != "text/plain" {
+		t.Fatalf("content type: %q", ct)
+	}
+
+	if got := rec.Body.String(); got != "zzz" {
+		t.Fatalf("body: %q", got)
+	}
+}
+
+func TestServeContent_HEAD(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodHead, "/", nil)
+
+	req.Header.Set("Accept-Encoding", "gzip")
+
+	payload := strings.Repeat("hello world ", 100)
+	status, err := ServeContent(rec, req, body(payload, http.StatusOK))
+
+	if err != nil {
+		t.Fatalf("ServeContent: %v", err)
+	}
+
+	if status != http.StatusOK {
+		t.Fatalf("status: got %d, want 200", status)
+	}
+
+	res := rec.Result()
+
+	if res.Header.Get("Content-Length") == "" {
+		t.Fatalf("Content-Length: missing for HEAD")
+	}
+
+	if res.Header.Get("Content-Length") == strconv.Itoa(len(payload)) {
+		t.Fatalf("Content-Length: got uncompressed length, want compressed length")
+	}
+
+	if rec.Body.Len() != 0 {
+		t.Fatalf("body: got %d bytes, want 0", rec.Body.Len())
+	}
+}
+
+func TestServeContent_LargeGzipSpill(t *testing.T) {
+	// payload larger than the 64 KiB in-memory buffer to exercise the temp-file path.
+	payload := strings.Repeat("abcdefghij", 20_000) // 200 KB
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+
+	req.Header.Set("Accept-Encoding", "gzip")
+
+	status, err := ServeContent(rec, req, body(payload, http.StatusOK))
+
+	if err != nil {
+		t.Fatalf("ServeContent: %v", err)
+	}
+
+	if status != http.StatusOK {
+		t.Fatalf("status: got %d, want 200", status)
+	}
+
+	if got := rec.Result().Header.Get("Content-Encoding"); got != "gzip" {
+		t.Fatalf("Content-Encoding: got %q, want gzip", got)
+	}
+
+	if got := string(gunzip(t, rec.Body.Bytes())); got != payload {
+		t.Fatalf("decompressed body mismatch (got %d bytes, want %d)", len(got), len(payload))
+	}
+}
+
+func TestServeContent_HEAD_ErrorPath(t *testing.T) {
+	// uses httptest.NewServer so Go's HEAD body suppression is exercised end-to-end.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ServeContent(w, r, func(io.Writer) (int, error) {
+			return http.StatusInternalServerError, errors.New("boom")
+		})
+	}))
+
+	defer srv.Close()
+
+	res, err := http.Head(srv.URL)
+
+	if err != nil {
+		t.Fatalf("HEAD: %v", err)
+	}
+
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status: got %d, want 500", res.StatusCode)
+	}
+
+	b, err := io.ReadAll(res.Body)
+
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+
+	if len(b) != 0 {
+		t.Fatalf("body: got %q, want empty", b)
 	}
 }
 
@@ -316,35 +483,23 @@ func benchServeContent(b *testing.B, gz bool) {
 			for i := 0; i < b.N; i++ {
 				w.reset()
 
-				err := ServeContent(&w, req, func(wr io.Writer) (e error) {
-					_, e = wr.Write(randDataSlice[len(randDataSlice)-size:])
-					return
-				})
+				_, err := ServeContent(
+					&w,
+					req,
+					bodySlice(randDataSlice[len(randDataSlice)-size:], http.StatusOK),
+				)
 
 				if err != nil {
 					b.Fatalf("(%s) %v", baseNameOf(b), err)
 				}
 
-				switch size {
-				case 0:
-					if w.code != http.StatusNoContent {
-						b.Fatalf(
-							"(%s) unexpected HTTP code: %d instead of %d",
-							baseNameOf(b),
-							w.code,
-							http.StatusNoContent,
-						)
-					}
-
-				default:
-					if w.code != http.StatusOK {
-						b.Fatalf(
-							"(%s) unexpected HTTP code: %d instead of %d",
-							baseNameOf(b),
-							w.code,
-							http.StatusOK,
-						)
-					}
+				if w.code != http.StatusOK {
+					b.Fatalf(
+						"(%s) unexpected HTTP code: %d instead of %d",
+						baseNameOf(b),
+						w.code,
+						http.StatusOK,
+					)
 				}
 			}
 		})

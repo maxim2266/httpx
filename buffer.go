@@ -68,7 +68,7 @@ func (b *buffer) Write(data []byte) (n int, err error) {
 
 // WriteString implements [io.StringWriter] interface.
 func (b *buffer) WriteString(s string) (int, error) {
-	return b.Write(unsafe.Slice(unsafe.StringData(s), len(s)))
+	return writeString(b, s)
 }
 
 func (b *buffer) writeTo(w io.Writer) (err error) {
@@ -152,6 +152,12 @@ func write(w io.Writer, buff []byte) (err error) {
 	return
 }
 
+// write string
+func writeString(w io.Writer, s string) (int, error) {
+	return w.Write(unsafe.Slice(unsafe.StringData(s), len(s)))
+}
+
+// pool of buffers
 var bufferPool = sync.Pool{
 	New: func() any {
 		return new(buffer)
