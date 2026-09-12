@@ -58,7 +58,7 @@ func ServeContent(
 
 	// invoke content maker
 	gz := len(h.Values("Content-Encoding")) == 0 &&
-		gzipAcceted(r.Header.Values("Accept-Encoding")) &&
+		gzipAccepted(r.Header.Values("Accept-Encoding")) &&
 		!skipCompression(h.Get("Content-Type"))
 
 	if gz {
@@ -161,7 +161,7 @@ func setVaryHeader(h http.Header) {
 }
 
 // gzip acceptance tester
-func gzipAcceted(h []string) bool {
+func gzipAccepted(h []string) bool {
 	return slices.ContainsFunc(h, hasGzip)
 }
 
