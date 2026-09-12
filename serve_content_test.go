@@ -152,6 +152,8 @@ func TestServeContent_Body(t *testing.T) {
 			wantEncoding: "gzip",
 		},
 		{
+			// here no compression is applied, and the encoding reported in response
+			// is not the one accepted in the request, but that's ok for the test
 			name:         "gzip skipped when Content-Encoding already set",
 			acceptEnc:    "gzip",
 			preHeaders:   map[string]string{"Content-Encoding": "br"},
@@ -159,11 +161,11 @@ func TestServeContent_Body(t *testing.T) {
 			wantEncoding: "br",
 		},
 		{
-			name:         "gzip applied despite preset identity",
+			name:         "gzip skipped when Content-Encoding: identity",
 			acceptEnc:    "gzip",
 			preHeaders:   map[string]string{"Content-Encoding": "identity"},
 			content:      payload,
-			wantEncoding: "gzip",
+			wantEncoding: "identity",
 		},
 		{
 			name:         "gzip with strong ETag",

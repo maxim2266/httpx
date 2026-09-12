@@ -57,7 +57,7 @@ func ServeContent(
 	h := w.Header()
 
 	// invoke content maker
-	gz := contentEncodingNotSet(h.Get("Content-Encoding")) &&
+	gz := len(h.Values("Content-Encoding")) == 0 &&
 		gzipAcceted(r.Header.Values("Accept-Encoding")) &&
 		!skipCompression(h.Get("Content-Type"))
 
@@ -147,11 +147,6 @@ func ServeContent(
 func report(w http.ResponseWriter, prefix string, err error) (int, error) {
 	http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 	return http.StatusInternalServerError, fmt.Errorf("%s: %w", prefix, err)
-}
-
-// content encoding check
-func contentEncodingNotSet(s string) bool {
-	return len(s) == 0 || strings.EqualFold(s, "identity")
 }
 
 // set Vary header if not there yet
