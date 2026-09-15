@@ -17,6 +17,33 @@ import (
 	"github.com/klauspost/compress/gzip"
 )
 
+// Error is useful only within a [ContentMaker] function. It combines the given error
+// with additional content of the specified Content-Type. [ServeContent] will respond
+// with this content instead of a generic text for the status code.
+func Error(err error, contentType, content string) error {
+	return &problem{
+		err:      err,
+		cont:     content,
+		contType: cmp.Or(contentType, "text/plain; charset=utf-8"),
+	}
+}
+
+// error type
+type problem struct {
+	err            error
+	cont, contType string
+}
+
+// Error returns error message string
+func (p *problem) Error() string {
+	return p.Unwrap().Error()
+}
+
+// Unwrap returns underlying error object
+func (p *problem) Unwrap() error {
+	return p.err
+}
+
 // ContentMaker is the callback type invoked by [ServeContent] to generate the
 // response body. It writes the body to the provided [io.Writer] and returns an
 // HTTP status code and an error.
@@ -31,7 +58,8 @@ type ContentMaker = func(io.Writer) (int, error)
 //
 // Headers that affect delivery (Content-Type, ETag) must be set on w.Header()
 // before calling. If Content-Encoding is already set, ServeContent assumes the
-// caller is handling encoding and does not compress.
+// caller is handling encoding and does not compress. (Hint: set Content-Encoding
+// to "identity" to disable compression.)
 //
 // The callback's output is fully buffered before any status or header is
 // written, so an error or invalid status do not send partial body.
@@ -85,6 +113,7 @@ func ServeContent(
 			w.WriteHeader(status)
 			writeString(w, e.cont)
 
+			// return the underlying error
 			err = e.Unwrap()
 
 		} else {
