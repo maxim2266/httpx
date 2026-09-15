@@ -97,6 +97,8 @@ func ServeContent(
 
 	// fail on error
 	if err != nil {
+		h.Del("Content-Encoding")
+
 		// status must be 4xx or 5xx
 		if status < 400 || status > 599 {
 			status = http.StatusInternalServerError
@@ -104,9 +106,8 @@ func ServeContent(
 
 		// report error
 		if e, ok := err.(*problem); ok {
-			// set headers like http.Error does
+			// headers
 			h.Del("Content-Length")
-			h.Set("X-Content-Type-Options", "nosniff")
 			h.Set("Content-Type", e.contType)
 
 			// write response
@@ -174,7 +175,9 @@ func ServeContent(
 
 // respond with 500 and format error
 func report(w http.ResponseWriter, prefix string, err error) (int, error) {
+	w.Header().Del("Content-Encoding")
 	http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+
 	return http.StatusInternalServerError, fmt.Errorf("%s: %w", prefix, err)
 }
 
